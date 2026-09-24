@@ -23,7 +23,11 @@ from skills import REGISTRY
 from orchestrator import Trace, banner, W
 
 # 단계별 예상 소요 — 상황 판단(시간이 모자라는가)의 기준이 된다
-STAGE_COSTS = {"보관 확인": 2, "메뉴 결정": 3, "조달": 20, "준비": 4,
+# '조달' 은 더 이상 내가 정한 값이 아니다. 상점 어댑터가 알려주는
+# **가장 빠른 배송 시간**을 쓴다. 상점이 바뀌면 이 판단도 함께 바뀐다.
+import store as _store
+STAGE_COSTS = {"보관 확인": 2, "메뉴 결정": 3,
+               "조달": _store.min_delivery_min(), "준비": 4,
                "조리": 12, "세척 시작": 2}
 
 

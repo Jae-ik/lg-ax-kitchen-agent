@@ -139,37 +139,70 @@ class PrepSkill(Skill):
 
 class ProcureSkill(Skill):
     name = "procure"
-    description = ("부족한 항목을 조달한다. 되돌릴 수 없는 행동이므로 상한을 지킨다. "
-                   "상한을 넘거나 처음 사는 품목이거나 안전 필터에 걸리면 "
-                   "자동으로 주문하지 않고 사용자 확인을 요청한다.")
-    input_schema = {"missing": "list[str]", "catalog": "dict  품목→가격",
-                    "known_items": "list[str]  이전에 산 적 있는 품목",
-                    "avoid": "list[str]  알레르기·기피 품목",
-                    "auto_limit_krw": "int  1회 자동 주문 상한"}
+    description = ("부족한 항목을 장보기 서비스에서 조달한다. 여러 상점의 가격과 "
+                   "배송 시간을 비교해 제때 도착하는 것 중 가장 싼 것을 고른다. "
+                   "되돌릴 수 없는 행동이므로 상한·이력·안전 필터를 지키며, "
+                   "하나라도 걸리면 주문하지 않고 사용자 확인을 요청한다.")
+    input_schema = {
+        "missing": "list[str]",
+        "lookup": "(품목) -> list[Offer]   상점 조회 함수. 주입받는다",
+        "known_items": "list[str]  이전에 산 적 있는 품목",
+        "avoid": "list[str]  알레르기·기피 품목",
+        "auto_limit_krw": "int  1회 자동 주문 상한",
+        "deadline_min": "int | None  이 시간 안에 도착해야 한다",
+    }
     reusable_for = ["식재료 조달", "세제·소모품 재주문", "필터·부품 교체"]
     requires = ("missing_items",)
     provides = ("stock_complete",)
 
-    def run(self, missing: list, catalog: dict, known_items: list | None = None,
-            avoid: list | None = None, auto_limit_krw: int = 15000, **_) -> SkillResult:
+    def run(self, missing: list, lookup, known_items: list | None = None,
+            avoid: list | None = None, auto_limit_krw: int = 15000,
+            deadline_min: int | None = None, **_) -> SkillResult:
         known = set(known_items or [])
         avoid = set(avoid or [])
         auto, ask, ev = [], [], []
+
         for name in missing:
-            price = catalog.get(name)
-            if price is None:
-                ask.append({"name": name, "reason": "취급하지 않는 품목"}); continue
+            offers = lookup(name)
+            if not offers:
+                ask.append({"name": name, "reason": "취급하는 상점 없음"})
+                ev.append(f"{name}: 어느 상점에도 없음 → 확인 요청"); continue
             if name in avoid:
                 ask.append({"name": name, "reason": "알레르기·기피 목록에 있음"})
                 ev.append(f"{name}: 안전 필터에 걸려 자동 주문 보류"); continue
+
+            # 제때 도착하는 것만 남기고, 그중 가장 싼 것을 고른다
+            fit = [o for o in offers
+                   if deadline_min is None or o.delivery_min <= deadline_min]
+            if not fit:
+                fastest = min(offers, key=lambda o: o.delivery_min)
+                ask.append({"name": name,
+                            "reason": f"가장 빠른 배송 {fastest.delivery_min}분 > "
+                                      f"남은 {deadline_min}분"})
+                ev.append(f"{name}: 제때 도착하는 상점 없음 "
+                          f"(최속 {fastest.store} {fastest.delivery_min}분) → 확인 요청")
+                continue
+            best = min(fit, key=lambda o: o.price_krw)
+            ev.append(f"{name}: 상점 {len(offers)}곳 비교 → "
+                      + " / ".join(f"{o.store} {o.price_krw:,}원 {o.delivery_min}분"
+                                   for o in offers))
+
             if name not in known:
                 ask.append({"name": name, "reason": "처음 구매하는 품목"})
-                ev.append(f"{name}: 구매 이력 없음 → 확인 요청"); continue
-            if price > auto_limit_krw:
-                ask.append({"name": name, "reason": f"{price:,}원 > 상한 {auto_limit_krw:,}원"})
-                ev.append(f"{name}: 금액 상한 초과 → 확인 요청"); continue
-            auto.append({"name": name, "price_krw": price})
-            ev.append(f"{name}: {price:,}원 — 이력 있고 상한 이내 → 자동 주문")
+                ev.append(f"  {name}: 구매 이력 없음 → 확인 요청"); continue
+            if best.price_krw > auto_limit_krw:
+                ask.append({"name": name,
+                            "reason": f"{best.price_krw:,}원 > 상한 {auto_limit_krw:,}원"})
+                ev.append(f"  {name}: 금액 상한 초과 → 확인 요청"); continue
+
+            auto.append({"name": name, "price_krw": best.price_krw,
+                         "store": best.store, "delivery_min": best.delivery_min,
+                         "source": best.source})
+            ev.append(f"  {name}: {best.store} {best.price_krw:,}원 "
+                      f"{best.delivery_min}분 — 이력 있고 상한 이내 → 자동 주문")
+
         total = sum(a["price_krw"] for a in auto)
+        eta = max((a["delivery_min"] for a in auto), default=0)
         return SkillResult(True, {"auto_ordered": auto, "need_confirm": ask,
-                                  "total_krw": total}, ev or ["조달할 항목 없음"])
+                                  "total_krw": total, "arrive_in_min": eta},
+                           ev or ["조달할 항목 없음"])

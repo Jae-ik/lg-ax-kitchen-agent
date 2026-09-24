@@ -15,6 +15,7 @@ import pathlib
 import kitchen as K
 from planner import Task
 from recipe_parse import contains_any
+import store
 
 RECIPE_CACHE = pathlib.Path(__file__).parent / "data" / "recipes.json"
 
@@ -92,13 +93,10 @@ def recipe_to_record(r: dict) -> dict:
             "sodium_mg": r.get("sodium_mg"), "kcal": r.get("kcal")}
 
 # 취급 품목과 구매 이력 — 실제로는 제휴 장보기 서비스에서 온다
-CATALOG = {"두부": 2800, "대파": 1900, "표고버섯": 4500, "간장": 3200,
-           "된장": 5400, "닭고기": 9800, "한우등심": 32000,
-           # 레시피 자료에 자주 나오는 품목. 가격은 **추정값**이며
-           # 실제로는 제휴 장보기 서비스의 시세를 받아야 한다.
-           "찹쌀": 4200, "미나리": 2500, "양파": 2200, "당근": 2300,
-           "감자": 3100, "애호박": 1800, "배추": 4800, "무": 2600,
-           "달걀": 6500, "우유": 2900, "시금치": 2700, "오이": 1700}
+# 취급 품목과 가격은 store.py 의 상점 어댑터가 쥔다.
+# 조달 스킬은 가격표가 아니라 '조회 함수' 를 받는다 — 상점이 몇 곳인지,
+# 시뮬레이터인지 실제 API 인지 알지 못한다.
+CATALOG = store.BASE_PRICE          # 재고 반영·수량 산정에만 쓴다
 KNOWN_ITEMS = ["두부", "대파", "간장", "된장", "닭고기", "양파", "당근",
                "감자", "달걀", "배추", "애호박"]        # 이전에 산 적 있는 품목
 AUTO_LIMIT_KRW = 15000                                # 1회 자동 주문 상한
@@ -158,9 +156,11 @@ def build_tasks(constraints: dict) -> list:
         ctx["menu_from"] = "공개 레시피" if rid.startswith("pub_") else "저장된 기록"
 
     def _procure_bind(ctx):
-        return {"missing": ctx.get("missing", []), "catalog": CATALOG,
+        return {"missing": ctx.get("missing", []),
+                "lookup": store.make_lookup(),
                 "known_items": KNOWN_ITEMS, "avoid": avoid,
-                "auto_limit_krw": AUTO_LIMIT_KRW}
+                "auto_limit_krw": AUTO_LIMIT_KRW,
+                "deadline_min": constraints.get("budget_min")}
 
     def _procure_absorb(ctx, out):
         def qty_for(name):
@@ -170,6 +170,9 @@ def build_tasks(constraints: dict) -> list:
         for a in out["auto_ordered"]:
             K.fridge_add(a["name"], qty_for(a["name"]))
         ctx["order_krw"] = out["total_krw"]
+        ctx["order_eta_min"] = out.get("arrive_in_min", 0)
+        ctx["order_stores"] = sorted({a.get("store") for a in out["auto_ordered"]
+                                      if a.get("store")})
         ctx["need_confirm"] = out["need_confirm"]
         # 되돌릴 수 없는 행동을 막은 만큼 사용자가 직접 확인해야 한다
         ctx["touches"] = ctx.get("touches", 0) + len(out["need_confirm"])
@@ -287,6 +290,9 @@ def make_executor(registry, on_step=None):
             metrics["기본 코스 대비 절감(L)"] = ctx["water_saved_l"]
         if ctx.get("order_krw"):
             metrics["자동 주문(원)"] = ctx["order_krw"]
+            if ctx.get("order_stores"):
+                metrics["주문 상점"] = ", ".join(ctx["order_stores"])
+                metrics["도착까지(분)"] = ctx["order_eta_min"]
         if ctx.get("need_confirm"):
             metrics["확인 요청"] = [c["name"] + " — " + c["reason"]
                                  for c in ctx["need_confirm"]]

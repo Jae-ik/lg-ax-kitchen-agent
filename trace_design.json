@@ -1,6 +1,461 @@
 [
  {
   "stage": "GOAL",
+  "text": "야근이 잦은 1인 가구의 수고를 줄이는 UX 시나리오를 만들고 실행으로 검증한다",
+  "data": {
+   "입력": "고객 상황",
+   "사용자 지시": null,
+   "보고된 불편": 3
+  }
+ },
+ {
+  "stage": "PLAN",
+  "text": "전제조건에서 계산한 설계 단계",
+  "data": {
+   "순서": [
+    "situation_read",
+    "scenario_draft",
+    "flow_design",
+    "experience_verify"
+   ]
+  }
+ },
+ {
+  "stage": "SKILL",
+  "text": "[1/4] situation_read — 상황을 읽어야 무엇을 없앨지 정해진다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "situation_read 실행",
+  "data": {
+   "friction": [
+    {
+     "what": "냉장고를 열어 뭐가 남았는지 확인하는 일",
+     "source": "고객 진술"
+    },
+    {
+     "what": "조리 중 냄비 앞을 떠나지 못하는 일",
+     "source": "고객 진술"
+    },
+    {
+     "what": "먹고 나서 설거지를 미루는 일",
+     "source": "고객 진술"
+    },
+    {
+     "what": "시간이 모자란 상태에서 메뉴를 정하는 일",
+     "source": "상황 추론(시간 예산)"
+    }
+   ],
+   "constraints": {
+    "skip_procurement": true,
+    "finish_cleanup": true,
+    "avoid": [],
+    "max_sodium_mg": null,
+    "budget_min": 25,
+    "quiet_after": "22:30"
+   },
+   "need_min": 43,
+   "budget_min": 25
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "[2/4] scenario_draft — 수고가 사라진 하루를 먼저 그려야 설계 기준이 생긴다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "scenario_draft 실행",
+  "data": null
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "[3/4] flow_design — 시나리오를 실현할 가전 작업 순서를 계산한다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "flow_design 실행",
+  "data": {
+   "flow": {
+    "goal": [
+     "cleaned",
+     "cooked"
+    ],
+    "known": [
+     "stock_complete"
+    ],
+    "steps": [
+     "inventory",
+     "recipe_source",
+     "menu",
+     "prep",
+     "converge",
+     "aftercare"
+    ],
+    "assignment": [
+     {
+      "step": 1,
+      "skill": "inventory",
+      "note": "무엇이 곧 상하는지 알아야 목표가 생긴다"
+     },
+     {
+      "step": 2,
+      "skill": "recipe_source",
+      "note": "먹을 수 있는 것만 남긴 후보군을 공개 자료에서 먼저 만든다"
+     },
+     {
+      "step": 3,
+      "skill": "menu",
+      "note": "임박 재료를 쓰는 기록을 골라야 버리는 것이 줄어든다"
+     },
+     {
+      "step": 4,
+      "skill": "prep",
+      "note": "계량과 예상 수분을 넘겨야 조리가 같은 출발점에서 시작한다"
+     },
+     {
+      "step": 5,
+      "skill": "converge",
+      "note": "시간이 아니라 목표 상태로 조리를 끝낸다"
+     },
+     {
+      "step": 6,
+      "skill": "aftercare",
+      "note": "조리기만 아는 눌어붙음 정도를 세척기에 넘긴다"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "[4/4] experience_verify — 그림으로 끝내지 않고 실제로 돌려 확인한다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "experience_verify 실행",
+  "data": {
+   "verified": true,
+   "user_touches": 0,
+   "touch_baseline": 6,
+   "touches_removed": 6,
+   "beats_total": 4,
+   "beats_met": 4,
+   "unmet": [],
+   "beat_check": [
+    {
+     "at": "21:40",
+     "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일",
+     "ok": true,
+     "why": "inventory 실행 성공"
+    },
+    {
+     "at": "21:42",
+     "removes": "시간이 모자란 상태에서 메뉴를 정하는 일",
+     "ok": true,
+     "why": "menu 실행 성공"
+    },
+    {
+     "at": "21:45",
+     "removes": "조리 중 냄비 앞을 떠나지 못하는 일",
+     "ok": true,
+     "why": "converge 실행 성공"
+    },
+    {
+     "at": "22:25",
+     "removes": "먹고 나서 설거지를 미루는 일 / 세척기를 언제 돌릴지 정하는 일",
+     "ok": true,
+     "why": "aftercare 실행 성공"
+    }
+   ],
+   "metrics": {
+    "가열 시간(분)": 8,
+    "기록 고정시간 대비(분)": 3,
+    "최종 질량비": 0.7756,
+    "세척 코스": "강력(불림 포함)",
+    "기대 물 사용(L)": 16.8,
+    "기본 코스 대비 절감(L)": 1.4,
+    "메뉴": "된장찌개"
+   }
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "OUTPUT",
+  "text": "야근이 잦은 1인 가구 — UX 시나리오 4장면, 사용자 개입 0회 (설계 전 6회)",
+  "data": {
+   "가전 순서": [
+    "inventory",
+    "recipe_source",
+    "menu",
+    "prep",
+    "converge",
+    "aftercare"
+   ],
+   "가열 시간(분)": 8,
+   "기록 고정시간 대비(분)": 3,
+   "최종 질량비": 0.7756,
+   "세척 코스": "강력(불림 포함)",
+   "기대 물 사용(L)": 16.8,
+   "기본 코스 대비 절감(L)": 1.4,
+   "메뉴": "된장찌개"
+  }
+ },
+ {
+  "stage": "GOAL",
+  "text": "맞벌이 2인 가구의 수고를 줄이는 UX 시나리오를 만들고 실행으로 검증한다",
+  "data": {
+   "입력": "고객 상황",
+   "사용자 지시": null,
+   "보고된 불편": 3
+  }
+ },
+ {
+  "stage": "PLAN",
+  "text": "전제조건에서 계산한 설계 단계",
+  "data": {
+   "순서": [
+    "situation_read",
+    "scenario_draft",
+    "flow_design",
+    "experience_verify"
+   ]
+  }
+ },
+ {
+  "stage": "SKILL",
+  "text": "[1/4] situation_read — 상황을 읽어야 무엇을 없앨지 정해진다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "situation_read 실행",
+  "data": {
+   "friction": [
+    {
+     "what": "누가 장을 볼지 매번 정하는 일",
+     "source": "고객 진술"
+    },
+    {
+     "what": "재료가 남아 버리는 일",
+     "source": "고객 진술"
+    },
+    {
+     "what": "세척기를 언제 돌릴지 정하는 일",
+     "source": "고객 진술"
+    }
+   ],
+   "constraints": {
+    "skip_procurement": false,
+    "finish_cleanup": true,
+    "avoid": [],
+    "max_sodium_mg": null,
+    "budget_min": 45,
+    "quiet_after": "23:00"
+   },
+   "need_min": 43,
+   "budget_min": 45
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "[2/4] scenario_draft — 수고가 사라진 하루를 먼저 그려야 설계 기준이 생긴다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "scenario_draft 실행",
+  "data": null
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "[3/4] flow_design — 시나리오를 실현할 가전 작업 순서를 계산한다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "flow_design 실행",
+  "data": {
+   "flow": {
+    "goal": [
+     "cleaned",
+     "cooked"
+    ],
+    "known": [],
+    "steps": [
+     "inventory",
+     "recipe_source",
+     "menu",
+     "procure",
+     "prep",
+     "converge",
+     "aftercare"
+    ],
+    "assignment": [
+     {
+      "step": 1,
+      "skill": "inventory",
+      "note": "무엇이 곧 상하는지 알아야 목표가 생긴다"
+     },
+     {
+      "step": 2,
+      "skill": "recipe_source",
+      "note": "먹을 수 있는 것만 남긴 후보군을 공개 자료에서 먼저 만든다"
+     },
+     {
+      "step": 3,
+      "skill": "menu",
+      "note": "임박 재료를 쓰는 기록을 골라야 버리는 것이 줄어든다"
+     },
+     {
+      "step": 4,
+      "skill": "procure",
+      "note": "부족분이 있으면 재고를 먼저 채워야 조리가 가능하다"
+     },
+     {
+      "step": 5,
+      "skill": "prep",
+      "note": "계량과 예상 수분을 넘겨야 조리가 같은 출발점에서 시작한다"
+     },
+     {
+      "step": 6,
+      "skill": "converge",
+      "note": "시간이 아니라 목표 상태로 조리를 끝낸다"
+     },
+     {
+      "step": 7,
+      "skill": "aftercare",
+      "note": "조리기만 아는 눌어붙음 정도를 세척기에 넘긴다"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "[4/4] experience_verify — 그림으로 끝내지 않고 실제로 돌려 확인한다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "experience_verify 실행",
+  "data": {
+   "verified": true,
+   "user_touches": 0,
+   "touch_baseline": 7,
+   "touches_removed": 7,
+   "beats_total": 4,
+   "beats_met": 4,
+   "unmet": [],
+   "beat_check": [
+    {
+     "at": "19:20",
+     "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일",
+     "ok": true,
+     "why": "inventory 실행 성공"
+    },
+    {
+     "at": "19:22",
+     "removes": "누가 장을 볼지 매번 정하는 일",
+     "ok": true,
+     "why": "procure 실행 성공"
+    },
+    {
+     "at": "19:25",
+     "removes": "조리 중 냄비 앞을 떠나지 못하는 일",
+     "ok": true,
+     "why": "converge 실행 성공"
+    },
+    {
+     "at": "20:05",
+     "removes": "먹고 나서 설거지를 미루는 일 / 세척기를 언제 돌릴지 정하는 일",
+     "ok": true,
+     "why": "aftercare 실행 성공"
+    }
+   ],
+   "metrics": {
+    "가열 시간(분)": 8,
+    "기록 고정시간 대비(분)": 3,
+    "최종 질량비": 0.7756,
+    "세척 코스": "강력(불림 포함)",
+    "기대 물 사용(L)": 16.8,
+    "기본 코스 대비 절감(L)": 1.4,
+    "자동 주문(원)": 3080,
+    "주문 상점": "즉시배송",
+    "도착까지(분)": 20,
+    "메뉴": "된장찌개"
+   }
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "OUTPUT",
+  "text": "맞벌이 2인 가구 — UX 시나리오 4장면, 사용자 개입 0회 (설계 전 7회)",
+  "data": {
+   "가전 순서": [
+    "inventory",
+    "recipe_source",
+    "menu",
+    "procure",
+    "prep",
+    "converge",
+    "aftercare"
+   ],
+   "가열 시간(분)": 8,
+   "기록 고정시간 대비(분)": 3,
+   "최종 질량비": 0.7756,
+   "세척 코스": "강력(불림 포함)",
+   "기대 물 사용(L)": 16.8,
+   "기본 코스 대비 절감(L)": 1.4,
+   "자동 주문(원)": 3080,
+   "주문 상점": "즉시배송",
+   "도착까지(분)": 20,
+   "메뉴": "된장찌개"
+  }
+ },
+ {
+  "stage": "GOAL",
   "text": "알레르기 가족이 있는 4인 가구의 수고를 줄이는 UX 시나리오를 만들고 실행으로 검증한다",
   "data": {
    "입력": "고객 상황",
@@ -55,6 +510,7 @@
      "새우"
     ],
     "max_sodium_mg": 300,
+    "budget_min": 60,
     "quiet_after": "23:30"
    },
    "need_min": 43,
@@ -207,7 +663,7 @@
     "기대 물 사용(L)": 16.8,
     "기본 코스 대비 절감(L)": 1.4,
     "확인 요청": [
-     "찹쌀 — 처음 구매하는 품목",
+     "찹쌀 — 가장 빠른 배송 720분 > 남은 60분",
      "미나리 — 처음 구매하는 품목"
     ],
     "메뉴": "호박잎 삼계탕"
@@ -240,7 +696,7 @@
    "기대 물 사용(L)": 16.8,
    "기본 코스 대비 절감(L)": 1.4,
    "확인 요청": [
-    "찹쌀 — 처음 구매하는 품목",
+    "찹쌀 — 가장 빠른 배송 720분 > 남은 60분",
     "미나리 — 처음 구매하는 품목"
    ],
    "메뉴": "호박잎 삼계탕"

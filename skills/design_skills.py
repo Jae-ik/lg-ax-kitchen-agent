@@ -64,6 +64,8 @@ class SituationReadSkill(Skill):
         if na:
             ev.append(f"저염 권고 {na}mg → 후보 자료를 영양 기준으로 거른다")
 
+        constraints["budget_min"] = budget
+
         quiet = persona.get("dislike_noise_after")
         if quiet:
             constraints["quiet_after"] = quiet

@@ -10,10 +10,10 @@
 from __future__ import annotations
 import kitchen as K
 import dryer as D
+import store
 from skills import REGISTRY
 from orchestrator import Trace, banner, run_skill, W
 
-CATALOG = {"두부": 2800, "대파": 1900, "표고버섯": 4500, "한우등심": 32000}
 KNOWN = ["두부", "대파"]          # 이전에 산 적 있는 품목
 AVOID = ["표고버섯"]              # 가구원 기피·알레르기
 
@@ -43,7 +43,7 @@ def scenario_kitchen(trace):
 
     # ── 조달 ──
     proc = run_skill(REGISTRY, trace, "procure",
-                     missing=best["missing"], catalog=CATALOG,
+                     missing=best["missing"], lookup=store.make_lookup(),
                      known_items=KNOWN, avoid=AVOID, auto_limit_krw=15000)
     if proc.output["need_confirm"]:
         trace.stage("OUTPUT", "사용자 확인이 필요한 항목이 있어 멈춘다",

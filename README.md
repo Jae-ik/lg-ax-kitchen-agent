@@ -27,6 +27,7 @@ run_design.py        설계 Agent — 6단계 루프
 planner.py           전제조건·효과 기반 플래너. 호출 순서를 적어두지 않고 계산한다
 personas.py          고객 상황 3종 (입력)
 kitchen_domain.py    도메인 바인딩 — 여기만 바꾸면 세탁실·욕실이 된다
+store.py             장보기 서비스 어댑터 — 가격·배송시간 조회 (주문은 어댑터 자리만)
 skills/
   design_skills.py   설계 층 4  situation_read · scenario_draft · flow_design · experience_verify
   data_skills.py     실행 층 1  recipe_source  (자료 수집·선별)

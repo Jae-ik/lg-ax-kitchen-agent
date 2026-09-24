@@ -119,7 +119,7 @@
  },
  {
   "stage": "SKILL",
-  "text": "procure 선택 — 부족한 항목을 조달한다",
+  "text": "procure 선택 — 부족한 항목을 장보기 서비스에서 조달한다",
   "data": null
  },
  {
@@ -129,11 +129,15 @@
    "auto_ordered": [
     {
      "name": "두부",
-     "price_krw": 2800
+     "price_krw": 2660,
+     "store": "일반배송",
+     "delivery_min": 2880,
+     "source": "시뮬레이터"
     }
    ],
    "need_confirm": [],
-   "total_krw": 2800
+   "total_krw": 2660,
+   "arrive_in_min": 2880
   }
  },
  {
