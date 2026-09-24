@@ -62,6 +62,20 @@ def solid_mass(ingredients) -> float:
                for i in ingredients)
 
 
+# 조리 중 동작을 **누가 하는가.** 제안서 표1 은 "재료 손질·계량·투입,
+# 필요 시 교반" 을 사람 몫으로, "가열 제어 또는 조절 안내" 를 시스템 몫으로
+# 적었다. 그런데 코드는 투입·뚜껑·거품까지 스스로 하면서 "개입 0회" 라고
+# 보고하고 있었다 — 로봇이 아닌데 로봇처럼 굴었다.
+#
+# 가전이 실제로 할 수 있는 것은 **화력 조절과 판단·기록** 뿐이다.
+# 나머지는 사람의 손이 필요하고, 에이전트의 값은 그것을 **대신 하는 것이
+# 아니라 언제 해야 하는지 정확히 알려주는 것**이다. 그래서 냄비 앞을
+# 지키지 않아도 된다.
+WHO = {"화력": "가전", "종료": "가전", "관측": "가전",
+       "투입": "사람", "뚜껑": "사람", "거품": "사람",
+       "교반": "사람", "물": "사람"}
+HANDS_ON_MIN = 1.0          # 손이 가는 동작 하나에 드는 시간(분)
+
 # 익는 데 필요한 양 (온도-60) x 분. 두꺼운 고기일수록 크다.
 # 식약처 권장 중심온도 75도를 기준으로 잡은 가정이며 실측이 아니다.
 COOK_UNITS = {"닭고기": 1.05, "돼지고기": 1.2, "소고기": 0.9, "감자": 0.8,
@@ -384,7 +398,13 @@ def build_tasks(constraints: dict) -> list:
         pending.sort(key=lambda x: -x["at_ratio"])     # 먼저 넣을 것부터
         scum_left = [ctx.get("scum_g", 0.0)]
         lid_opened = [False]          # 한 번 열면 끝까지 연다
-        ctx.setdefault("kitchen_acts", [])
+        ctx.setdefault("hands_on", [])
+
+        def hand(kind, note):
+            """사람이 해야 하는 일. 에이전트는 때를 알려줄 뿐이다."""
+            ctx["hands_on"].append(
+                {"at_min": round(K.COOKER.elapsed_min, 1), "kind": kind,
+                 "who": WHO.get(kind, "사람"), "note": note})
 
         def hook(state):
             # (1) 뚜껑 — 끓을 때까지 덮고, 끓으면 열어 **끝까지 열어 둔다.**
@@ -394,14 +414,14 @@ def build_tasks(constraints: dict) -> list:
                 if state["temp_c"] >= 97.0:
                     lid_opened[0] = True
                     K.COOKER.set_lid(False)
-                    ctx["kitchen_acts"].append("뚜껑 엶")
+                    hand("뚜껑", "뚜껑을 연다")
                     return {"note": ("끓었다 → 뚜껑을 연다 "
                                      "(덮은 채로는 졸지 않는다). 증발이 갑자기 "
                                      "빨라지므로 주기를 줄여 다시 본다"),
                             "resets_baseline": False, "slow_down": True}
                 if not state.get("lid"):
                     K.COOKER.set_lid(True)
-                    ctx["kitchen_acts"].append("뚜껑 덮음")
+                    hand("뚜껑", "뚜껑을 덮는다")
                     return {"note": "뚜껑을 덮는다 — 빨리 끓는다",
                             "resets_baseline": False}
 
@@ -411,7 +431,7 @@ def build_tasks(constraints: dict) -> list:
                 e = K.COOKER.skim(scum_left[0], "거품")
                 scum_left[0] = 0.0
                 if e:
-                    ctx["kitchen_acts"].append(f"거품 {e['grams']}g 걷음")
+                    hand("거품", f"거품 {e['grams']}g 을 걷는다")
                     return {"note": (f"거품 {e['grams']}g 을 걷어낸다 — 질량이 줄지만 "
                                      f"증발이 아니므로 기준에서 뺀다"),
                             "resets_baseline": True}
@@ -422,7 +442,7 @@ def build_tasks(constraints: dict) -> list:
                     and state.get("stir_since_min", 0) >= 6.0):
                 K.COOKER.stir()
                 ctx["stir_prompts"] = ctx.get("stir_prompts", 0) + 1
-                ctx["kitchen_acts"].append("저어 달라고 알림")
+                hand("교반", "한 번 저어 준다")
                 return {"note": (f"눌어붙음 {state['soil_score']} — "
                                  f"\"지금 한 번 저어 주세요\" 안내"),
                         "resets_baseline": False}
@@ -438,6 +458,7 @@ def build_tasks(constraints: dict) -> list:
                                         temp_c=nxt["temp_c"])
             if not e:
                 return None
+            hand("투입", f"{nxt['name']} {nxt['grams']}g 을 넣는다")
             ctx.setdefault("stage_events", []).append(
                 {"name": nxt["name"], "at_ratio": nxt["at_ratio"],
                  "grams": nxt["grams"], "temp_drop_c": e["temp_drop_c"]})
@@ -666,10 +687,22 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["되돌림"] = ctx["recovered"]
         if ctx.get("recover_declined"):
             metrics["되돌리지 않음"] = ctx["recover_declined"]
-        if ctx.get("stir_prompts"):
-            metrics["교반 안내"] = f"{ctx['stir_prompts']}회 (사람이 하는 일 — 표1)"
-        if ctx.get("kitchen_acts"):
-            metrics["조리 중 조작"] = " / ".join(ctx["kitchen_acts"])
+        hands = ctx.get("hands_on") or []
+        if hands:
+            from collections import Counter
+            kinds = Counter(h["kind"] for h in hands)
+            metrics["손이 가는 일"] = (
+                f"{len(hands)}회 · "
+                + ", ".join(f"{k} {n}" for k, n in kinds.items()))
+            # 진짜 값은 '몇 번 손이 가는가' 가 아니라 **얼마나 붙어 있어야
+            # 하는가** 다. 에이전트가 없으면 언제 해야 할지 모르므로 조리
+            # 내내 냄비 앞을 지켜야 한다.
+            attended = round(len(hands) * HANDS_ON_MIN, 1)
+            cookm = ctx.get("cook_min") or 0
+            metrics["냄비 앞에 있어야 하는 시간"] = (
+                f"{attended}분 / 조리 {cookm}분"
+                + (f" (에이전트가 없으면 {cookm}분 내내)" if cookm else ""))
+            ctx["attended_min"] = attended
         if ctx.get("water_added_g"):
             metrics["물 보충"] = (f"재료가 빨아들일 {ctx['water_added_g']}g 을 "
                               f"미리 더 부었다")

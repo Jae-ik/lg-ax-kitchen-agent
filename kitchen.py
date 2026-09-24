@@ -5,6 +5,7 @@ LLM 과 무관한 순수 로직이다. 에이전트는 이 모듈의 함수만 �
 실제 기기(LG ThinQ 등)로 교체할 때 이 파일만 바꾸면 된다.
 """
 from __future__ import annotations
+import copy
 import random
 from dataclasses import dataclass, field
 
@@ -255,26 +256,38 @@ class Cooker:
     watered_g: float = 0.0            # 되돌리려고 부은 물
     lid: bool = False                 # 뚜껑
     stir_since_min: float = 0.0       # 마지막으로 저은 뒤 지난 시간
+    deterministic: bool = False       # True 면 회차 편차를 넣지 않는다(예측용)
     cook_units: float = 0.0           # 익힘 누적 (온도 x 시간)
     need_units: float = 0.0           # 다 익으려면 필요한 양
 
     # 열 모델 상수. 모두 **시뮬레이터 가정**이며 실측이 아니다.
     # 실제 기기에서는 냄비별로 재서 채워 넣어야 하는 자리다.
-    HEAT_K: float = 0.55              # 데워지는 속도
     ABSORB_RATE: float = 0.35         # 분당 흡수 속도 (남은 용량의 비율)
-    LID_EVAP: float = 0.15            # 뚜껑을 덮으면 증발이 이 비율로 준다
-    LID_HEAT: float = 1.30            # 뚜껑을 덮으면 이만큼 빨리 데워진다
-    LID_TEMP_GAIN: float = 18.0       # 뚜껑을 덮으면 도달 온도가 이만큼 오른다
     STIR_RELIEF: float = 0.55         # 저으면 그 뒤 눌어붙음이 이 비율로 준다
     COOK_BASE_C: float = 60.0         # 이 온도 위에서만 익는다
 
-    # 물 620g 을 100→90도로 식히는 열이 전부 증발에 쓰이면 약 11g 이다.
-    # 실제로는 냄비와 공기로도 빠져나가므로 그보다 적다. 아래 값은 여열이
-    # 5~10g(질량비 0.01 안팎) 나오도록 잡은 것이며, 실측으로 교체해야 한다.
-    COOL_K: float = 0.04              # 식는 속도 (620g 기준)
-    REF_MASS_G: float = 620.0         # COOL_K 를 잰 기준 질량
-    BASE_EVAP: float = 3.5            # 끓는 동안 화력 없이도 나가는 양 g/분
-    POWER_EVAP: float = 5.83          # 화력 한 단계당 g/분 (화력3 에서 약 21g)
+    # ── 열 모델 ──────────────────────────────────────────────────────
+    # 예전에는 온도를 `T += (목표온도 - T) * k` 로 밀었다(1차 지연). 그러면
+    #   · 양이 달라도 데우는 시간이 같고 (310g 과 2000g 이 둘 다 3.75분)
+    #   · 출발 온도 차이가 지수적으로 사라진다 (냉장 재료를 넣으나 마나)
+    # 실제 화구는 **일정한 열량**을 넣는다. 온도는 열량 수지로 정해진다.
+    #
+    #   dT/dt = (투입 - 손실) / (유효질량 x 비열)
+    #   끓는점에 닿으면 남는 열은 온도가 아니라 **증발**로 간다.
+    #
+    # 상수는 두 가지 실제 값에서 역산했다(둘 다 가정이며 실측 교체 대상).
+    #   · 620g 을 불 끄면 100→90도가 약 3분  → 방열 2.28 W/K
+    #   · 620g 을 화력 3 으로 20→100도 약 5.5분 → 화력당 298 W
+    C_WATER: float = 4.18             # 물 비열 J/g·K
+    LATENT_J_PER_G: float = 2260.0    # 증발 잠열
+    POT_EQ_G: float = 172.0           # 냄비 열용량 (물 환산 g)
+    WATT_PER_POWER: float = 298.0     # 화력 한 단계당 투입 열량 W
+    LOSS_W_PER_K: float = 2.28        # 주변으로 나가는 열 (뚜껑 열었을 때)
+    LID_LOSS: float = 0.45            # 뚜껑을 덮으면 손실이 이 비율
+    LID_EVAP: float = 0.15            # 뚜껑을 덮으면 증발한 물이 맺혀 돌아온다
+    SURF_EVAP: float = 0.02           # 끓지 않을 때 표면 증발 g/(K·분)
+    BOIL_C: float = 100.0
+    AMBIENT_C: float = 20.0
     peak_temp_c: float = 0.0
     log: list = field(default_factory=list)
 
@@ -380,48 +393,54 @@ class Cooker:
         self.elapsed_min += minutes
         # 온도: 화력에 따라 100도까지 상승.
         # **식는 속도는 데우는 속도보다 느리다** — 냄비와 내용물에 열이 남아
-        # 있기 때문이다. 불을 꺼도 한동안 계속 끓는다. 예전 모델은 화력을 0 으로
-        # 하면 증발이 즉시 멈춰, '미리 끄는' 판단이 필요 없는 세계였다.
-        # 뚜껑을 덮으면 증기가 갇혀 열이 덜 빠진다. 같은 화력으로 **더 높은
-        # 온도까지** 오르고, 오르는 속도도 빠르다. 계수만 키우면 도달 온도가
-        # 그대로라 효과가 안 보인다(시험에서 78.5 vs 79.0 도로 거의 같았다).
-        target_t = 40 + self.power * 13 + (self.LID_TEMP_GAIN if self.lid else 0)
-        # 데우는 속도는 **열용량에 반비례**한다. 상수로 두었더니 310g 과
-        # 2000g 이 같은 시간에 끓었다 — 양이 6배인데 같을 수는 없다.
-        # (식는 속도는 표면적/열용량이라 m^(-1/3), 데우는 쪽은 m^(-1))
-        k = (self._heat_k(self.mass_g) if target_t > self.temp_c
-             else self._cool_k(self.mass_g))
-        if self.lid and target_t > self.temp_c:
-            k = min(0.95, k * self.LID_HEAT)
-        # k 는 **1분당** 비율이다. 그대로 쓰면 tick(0.5) 도 tick(1.0) 과 같은
-        # 양만큼 온도를 바꾼다 — 관측을 자주 할수록 빨리 식는 세계가 된다.
-        # 관측 주기를 가변으로 만들면서 이 갱신식을 그대로 둔 것이 원인이었고,
-        # 그래서 여열 예측(1분 단위 계산)이 실제(0.45분 단위)와 2배 어긋났다.
-        # 지수 감쇠의 올바른 이산화로 고친다.
-        k_eff = 1 - (1 - k) ** minutes
+        # 있기 때문이다. 불을 꺼도 한동안 계속 끓는다.
+        #
+        # 열량 수지로 푼다. 투입(화력) - 손실(방열) 이 남으면 온도가 오르고,
+        # 끓는점에 닿으면 남는 열은 **온도가 아니라 증발**로 간다.
+        m_eff = self.mass_g + self.POT_EQ_G
+        p_in = self.power * self.WATT_PER_POWER
+        h = self.LOSS_W_PER_K * (self.LID_LOSS if self.lid else 1.0)
+        p_loss = h * (self.temp_c - self.AMBIENT_C)
+        p_net = p_in - p_loss
+        sec = minutes * 60.0
+        heat_cap = m_eff * self.C_WATER          # J/K
+
         t_before = self.temp_c
-        self.temp_c += (min(target_t, 100) - self.temp_c) * k_eff
-        # 증발량은 **스텝 동안의 평균 온도**로 구한다. 끝 온도만 쓰면 큰
-        # 스텝에서 과소평가된다(5분을 1분 단위로 가면 7.3g, 0.1분 단위로
-        # 가면 8.8g 으로 20% 어긋났다). 중점을 쓰면 스텝 크기에 덜 의존한다.
-        t_mid = (t_before + self.temp_c) / 2
-        # 증발: 끓기 시작(약 90도) 이후 본격화.
-        # 증발은 화력이 아니라 **온도**로 일어난다. 화력은 온도를 유지할 뿐이다.
-        # 그래서 화력이 0 이어도 끓는 동안에는 계속 준다 — 이것이 여열이다.
+        evap_boil = 0.0
+        if self.temp_c < self.BOIL_C:
+            dT = p_net * sec / heat_cap
+            if self.temp_c + dT > self.BOIL_C:
+                # 끓는점까지 올리고 남은 열은 증발에 쓰인다
+                used = (self.BOIL_C - self.temp_c) * heat_cap
+                self.temp_c = self.BOIL_C
+                evap_boil = max(0.0, p_net * sec - used) / self.LATENT_J_PER_G
+            else:
+                self.temp_c += dT
+        else:
+            if p_net > 0:
+                # 끓는 중에는 온도가 유지되고 투입분이 전부 증발로 간다
+                evap_boil = p_net * sec / self.LATENT_J_PER_G
+            else:
+                self.temp_c += p_net * sec / heat_cap
+
         # 재료가 국물을 빨아들인다. 총 질량은 그대로지만 졸일 수 있는 물이 준다.
         room = max(0.0, self.absorb_cap_g - self.absorbed_g)
         if room > 0 and self.temp_c > 60:
             take = min(room * self.ABSORB_RATE * minutes, self.free_liquid_g())
             self.absorbed_g += take
 
-        boil = max(0.0, (t_mid - 88) / 12)
-        evap = (self.BASE_EVAP + self.power * self.POWER_EVAP) * boil * minutes
+        # 끓지 않아도 뜨거운 표면에서는 물이 날아간다. 여열 구간이 이 몫이다.
+        t_mid = (t_before + self.temp_c) / 2
+        evap = evap_boil + self.SURF_EVAP * max(0.0, t_mid - 40) * minutes
         # 뚜껑을 덮으면 증발한 물이 맺혀 돌아온다 — 졸지 않는다.
         if self.lid:
             evap *= self.LID_EVAP
         # 자유 수분보다 많이 날아갈 수는 없다. 바닥나면 증발이 멎는다.
         evap = min(evap, self.free_liquid_g())
-        evap *= random.uniform(0.92, 1.08)          # 회차 간 편차
+        # 회차 간 편차. **예측용 복사본에서는 넣지 않는다** — 예측이 전역
+        # 난수를 소비하면 예측을 몇 번 했느냐에 따라 실제 조리 결과가 달라진다.
+        if not self.deterministic:
+            evap *= random.uniform(0.92, 1.08)
         self.mass_g = max(0.0, self.mass_g - evap)
 
         # 눌어붙음은 **조리기만 알 수 있는 값**이다. 끓는 상태에서 수분이 줄수록,
@@ -430,6 +449,7 @@ class Cooker:
         # 계수 0.30 은 시뮬레이터 값이며 실측이 아니다.
         # 눌어붙음은 **자유 수분이 적을수록** 심해진다. 총 질량이 아니라
         # 국물이 있느냐가 기준이다 — 찹쌀이 물을 다 먹으면 바닥이 탄다.
+        boil = max(0.0, (t_mid - 88) / 12)
         free_ratio = (self.free_liquid_g() / self.mass_g) if self.mass_g else 0.0
         dryness = 1.0 - min(1.0, free_ratio / 0.5)      # 자유 수분 50% 이하부터
         self.stir_since_min += minutes
@@ -478,57 +498,40 @@ class Cooker:
                 "overflow_risk": self.overflow_risk(),
                 "power": self.power}
 
-    def _heat_k(self, mass_g: float) -> float:
-        """데우는 속도. 투입 열량이 같으면 양에 반비례한다."""
-        return min(0.95, self.HEAT_K * (self.REF_MASS_G / max(1.0, mass_g)))
-
-    def _cool_k(self, mass_g: float) -> float:
-        """식는 속도는 양에 따라 다르다.
-
-        작은 냄비는 빨리 식는다 — 열용량은 질량에 비례하는데 열이 빠져나가는
-        표면적은 질량의 2/3 제곱으로만 늘기 때문이다. 이것을 무시하고 상수로
-        두었더니, 237g 짜리 삼계탕에서 여열을 620g 기준으로 과대평가해
-        4.5분에 불을 껐다가 목표에 닿지 못했다.
-        """
-        return self.COOL_K * (self.REF_MASS_G / max(1.0, mass_g)) ** (1 / 3)
-
-    def predict_residual_g(self, horizon_min: int = 12) -> float:
+    def predict_residual_g(self, horizon_min: int = 15) -> float:
         """지금 불을 끄면 **앞으로 더 날아갈 양**.
 
         숙련자는 목표에 닿고 나서 끄지 않는다. 닿기 전에 끈다 — 여열로
         조금 더 가기 때문이다. 그 '조금' 이 얼마인지는 기기가 자기 열 모델로
         안다. 제어기가 이 값을 모르면 항상 목표를 지나친다.
+
+        예측은 **실제와 같은 코드**로 한다. 따로 식을 적어 두면 본체를 고칠
+        때 어긋난다 — 실제로 한 번 어긋나서 예측이 2배 틀렸다.
         """
-        # tick 과 같은 순서로 계산해야 한다 — tick 은 온도를 먼저 낮추고
-        # 증발을 구한다. 순서를 뒤집으면 첫 항이 과대평가돼 3배 틀린다.
-        t, total, m = self.temp_c, 0.0, self.mass_g
+        ghost = copy.copy(self)
+        ghost.log = []
+        ghost.power = 0
+        ghost.deterministic = True
+        before = ghost.mass_g
         for _ in range(horizon_min):
-            t0 = t
-            t += (40 - t) * self._cool_k(m)
-            boil = max(0.0, ((t0 + t) / 2 - 88) / 12)   # tick 과 같은 중점법
-            if boil <= 0:
+            prev = ghost.mass_g
+            ghost.tick(1.0)
+            if prev - ghost.mass_g < 0.01:
                 break
-            gone = self.BASE_EVAP * boil          # 화력 0 기준
-            total += gone
-            m = max(1.0, m - gone)                # 줄어든 양은 더 빨리 식는다
-        return round(total, 2)
+        return round(before - ghost.mass_g, 2)
 
     def rest_until_still(self, max_min: int = 20) -> dict:
         """불을 끄고 **끓음이 멎을 때까지** 둔다. 그리고 그때 상태를 돌려준다.
 
         사람이 먹는 것은 불을 끄는 순간의 음식이 아니라 여열이 끝난 음식이다.
-        그런데 지금까지 기록에 저장한 값은 **불을 끄는 순간**의 것이었다.
-        그 값을 다음 목표로 삼으면, 재현할 때 그 지점에서 또 여열이 붙어
-        매번 조금씩 더 졸아든다. 5회 반복하니 실제로 먹는 상태가
-        0.7654 에서 0.7599 로 흘러갔다.
-
-        "만족한 결과" 는 먹은 상태다. 그 시점에 재야 한다.
+        기록에 저장하는 값도 그 시점의 것이어야 한다 — 불 끄는 순간의 값을
+        저장하면 재현할 때 그 지점에서 또 여열이 붙어 회차마다 더 졸아든다.
         """
         self.set_power(0)
         for _ in range(max_min):
             before = self.mass_g
             self.tick(1.0)
-            if before - self.mass_g < 0.01:      # 더 이상 줄지 않는다
+            if before - self.mass_g < 0.01:
                 break
         return self.state()
 
