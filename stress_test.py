@@ -463,6 +463,71 @@ def t35():
             f"(묽어짐 {e['dilution'] if e else 0:.1%})")
 
 
+@case("수명이 지난 재료를 쓰려 하는가")
+def t36():
+    r = REGISTRY.get("inventory").run(items=[
+        {"name": "닭고기", "qty_g": 500, "stored_days": 5, "shelf_life_days": 3},
+        {"name": "배추", "qty_g": 300, "stored_days": 6, "shelf_life_days": 7}])
+    o = r.output
+    return (f"임박 {[u['name'] for u in o['urgent']]} / "
+            f"폐기 {[(e['name'], e['days_over']) for e in o['expired']]}")
+
+
+@case("졸임은 끝났는데 안 익었을 때")
+def t37():
+    K.reset()
+    # 거의 안 졸이는 목표 + 두꺼운 고기 → 익힘이 제약이 된다
+    K.COOKER.start(900, 0, power=3, capacity_g=3000, solid_g=700,
+                   need_units=1400)
+    r = REGISTRY.get("converge").run(
+        observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
+        step=K.COOKER.tick, metric="mass_ratio", target=0.95,
+        direction="down", ready_key="temp_c", ready_at=92.0,
+        max_steps=400, max_minutes=60,
+        also_require=lambda st: st.get("doneness", 1.0) >= 1.0)
+    s_ = K.COOKER.state()
+    K.COOKER.stop()
+    return (f"ok={r.ok} {r.output['steps']}분 · 질량비 {r.output['final']} · "
+            f"익힘 {s_['doneness']} · 유지 {r.output.get('held')}")
+
+
+@case("양이 많으면 데우는 데 오래 걸리는가")
+def t39():
+    out = []
+    for g in (310, 620, 2000):
+        K.reset(seed=4)
+        K.COOKER.start(g, 0, power=3, capacity_g=3000)
+        n = 0
+        while K.COOKER.state()["temp_c"] < 95 and n < 400:
+            K.COOKER.tick(0.25)
+            if K.COOKER.state()["temp_c"] < 92:
+                K.COOKER.set_power(min(5, K.COOKER.power + 1))
+            n += 1
+        out.append(f"{g}g {n * 0.25:.2f}분")
+        K.COOKER.stop()
+    return " / ".join(out)
+
+
+@case("출발 온도 차이가 유지되는가 (모델 한계 확인)")
+def t38():
+    out = []
+    for t0 in (20.0, 6.0):
+        K.reset(seed=4)
+        K.COOKER.start(620, 0, power=3, capacity_g=1100, start_temp_c=t0)
+        n = 0
+        while K.COOKER.state()["temp_c"] < 95 and n < 200:
+            K.COOKER.tick(0.25)
+            if K.COOKER.state()["temp_c"] < 92:
+                K.COOKER.set_power(min(5, K.COOKER.power + 1))
+            n += 1
+        out.append(f"{t0}도 출발 {n * 0.25:.2f}분")
+        K.COOKER.stop()
+    return (" / ".join(out)
+            + "  ← 같으면 한계다. 1차 지연 모델은 출발 온도 차이를 "
+              "지수적으로 지운다. 실제 화구는 일정 열량을 넣어 선형에 가깝고 "
+              "차이가 더 오래 간다")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("t") and callable(v) and hasattr(v, "_name")]

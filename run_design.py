@@ -43,7 +43,9 @@ def build_design_tasks(ctx_seed: dict) -> list:
     return [
         Task(skill="situation_read", provides=("friction", "constraints"),
              bind=lambda c: {"persona": c["persona"], "stage_costs": STAGE_COSTS},
-             absorb=lambda c, o: c.update(friction=o["friction"],
+             absorb=lambda c, o: c["seed"].update(
+                 time_budget_min=o["constraints"].get("time_budget_min")
+             ) or c.update(friction=o["friction"],
                                           constraints=o["constraints"]),
              note="상황을 읽어야 무엇을 없앨지 정해진다"),
         Task(skill="scenario_draft", requires=("friction", "constraints"),
@@ -63,7 +65,8 @@ def build_design_tasks(ctx_seed: dict) -> list:
              provides=("verified",),
              bind=lambda c: {"scenario": c["scenario"], "plan": c["exec_plan"],
                              "execute": c["executor"],
-                             "touch_baseline": len(c["exec_plan"].steps)},
+                             "touch_baseline": len(c["exec_plan"].steps),
+                             "budget_min": c["constraints"].get("time_budget_min")},
              absorb=lambda c, o: c.update(verify=o),
              note="그림으로 끝내지 않고 실제로 돌려 확인한다"),
     ]
@@ -87,8 +90,11 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
                  "보고된 불편": len(p["friction_reported"])})
 
     refill = pantry_refill(low)
-    ctx = {"persona": p,
-           "executor": make_executor(REGISTRY, seed_ctx={"pantry_refill": refill})}
+    # 실행 층에 넘길 초기값. 상황 판단(situation_read)이 끝난 뒤에야 알 수
+    # 있는 값(시간 예산 등)이 있으므로, 같은 dict 를 참조로 공유해 나중에 채운다.
+    seed = {"pantry_refill": refill}
+    ctx = {"persona": p, "seed": seed,
+           "executor": make_executor(REGISTRY, seed_ctx=seed)}
     tasks = build_design_tasks(ctx)
     dp = make_plan({"verified"}, tasks)
 

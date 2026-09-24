@@ -255,6 +255,8 @@ class Cooker:
     watered_g: float = 0.0            # 되돌리려고 부은 물
     lid: bool = False                 # 뚜껑
     stir_since_min: float = 0.0       # 마지막으로 저은 뒤 지난 시간
+    cook_units: float = 0.0           # 익힘 누적 (온도 x 시간)
+    need_units: float = 0.0           # 다 익으려면 필요한 양
 
     # 열 모델 상수. 모두 **시뮬레이터 가정**이며 실측이 아니다.
     # 실제 기기에서는 냄비별로 재서 채워 넣어야 하는 자리다.
@@ -264,6 +266,7 @@ class Cooker:
     LID_HEAT: float = 1.30            # 뚜껑을 덮으면 이만큼 빨리 데워진다
     LID_TEMP_GAIN: float = 18.0       # 뚜껑을 덮으면 도달 온도가 이만큼 오른다
     STIR_RELIEF: float = 0.55         # 저으면 그 뒤 눌어붙음이 이 비율로 준다
+    COOK_BASE_C: float = 60.0         # 이 온도 위에서만 익는다
 
     # 물 620g 을 100→90도로 식히는 열이 전부 증발에 쓰이면 약 11g 이다.
     # 실제로는 냄비와 공기로도 빠져나가므로 그보다 적다. 아래 값은 여열이
@@ -343,18 +346,22 @@ class Cooker:
 
     def start(self, initial_mass_g: float, extra_water_g: float = 0.0, power: int = 3,
               capacity_g: float | None = None, solid_g: float = 0.0,
-              absorb_cap_g: float = 0.0, lid: bool = False):
+              absorb_cap_g: float = 0.0, lid: bool = False,
+              need_units: float = 0.0, start_temp_c: float = 20.0):
         self.running = True
         if capacity_g:
             self.capacity_g = capacity_g
         self.solid_g = solid_g
         self.absorb_cap_g = absorb_cap_g
         self.lid = lid
+        self.need_units = need_units
         self.elapsed_min = 0.0
         self.initial_mass_g = initial_mass_g + extra_water_g
         self.mass_g = self.initial_mass_g
         self.extra_water_g = extra_water_g
-        self.temp_c = 20.0
+        # 냉장고에서 갓 꺼낸 재료는 20도가 아니다. 출발 온도가 낮으면
+        # 끓기까지 더 걸리고, 그만큼 조리 시간이 길어진다.
+        self.temp_c = start_temp_c
         self.power = power
         self.soil = 0.0
         self.added_g = 0.0
@@ -362,6 +369,7 @@ class Cooker:
         self.skimmed_g = 0.0
         self.watered_g = 0.0
         self.stir_since_min = 0.0
+        self.cook_units = 0.0
         self.peak_temp_c = 20.0
         self.log = [(0.0, self.mass_g, self.temp_c)]
 
@@ -378,7 +386,11 @@ class Cooker:
         # 온도까지** 오르고, 오르는 속도도 빠르다. 계수만 키우면 도달 온도가
         # 그대로라 효과가 안 보인다(시험에서 78.5 vs 79.0 도로 거의 같았다).
         target_t = 40 + self.power * 13 + (self.LID_TEMP_GAIN if self.lid else 0)
-        k = self.HEAT_K if target_t > self.temp_c else self._cool_k(self.mass_g)
+        # 데우는 속도는 **열용량에 반비례**한다. 상수로 두었더니 310g 과
+        # 2000g 이 같은 시간에 끓었다 — 양이 6배인데 같을 수는 없다.
+        # (식는 속도는 표면적/열용량이라 m^(-1/3), 데우는 쪽은 m^(-1))
+        k = (self._heat_k(self.mass_g) if target_t > self.temp_c
+             else self._cool_k(self.mass_g))
         if self.lid and target_t > self.temp_c:
             k = min(0.95, k * self.LID_HEAT)
         # k 는 **1분당** 비율이다. 그대로 쓰면 tick(0.5) 도 tick(1.0) 과 같은
@@ -427,6 +439,12 @@ class Cooker:
                         boil * (0.30 + dryness) * (self.power / 5) * minutes
                         * 0.30 * stir_factor)
         self.peak_temp_c = max(self.peak_temp_c, self.temp_c)
+
+        # 익힘. 제안서는 "익힘·졸임의 판단이 어려운" 사용자를 대상으로 적었는데
+        # 코드에는 졸임만 있었다. 질량비가 목표에 닿아도 닭고기가 안 익었으면
+        # 그 요리는 끝난 것이 아니다. 60도 위에서 (온도-60) x 시간 을 쌓는다.
+        if self.temp_c > self.COOK_BASE_C:
+            self.cook_units += (t_mid - self.COOK_BASE_C) * minutes
         self.log.append((round(self.elapsed_min, 1), round(self.mass_g, 1),
                          round(self.temp_c, 1)))
 
@@ -453,10 +471,16 @@ class Cooker:
                 "watered_g": round(self.watered_g, 1),
                 "lid": self.lid,
                 "stir_since_min": round(self.stir_since_min, 1),
+                "doneness": round(self.cook_units / self.need_units, 3)
+                if self.need_units else 1.0,
                 "fill_ratio": round(self.mass_g / self.capacity_g, 3)
                 if self.capacity_g else 0.0,
                 "overflow_risk": self.overflow_risk(),
                 "power": self.power}
+
+    def _heat_k(self, mass_g: float) -> float:
+        """데우는 속도. 투입 열량이 같으면 양에 반비례한다."""
+        return min(0.95, self.HEAT_K * (self.REF_MASS_G / max(1.0, mass_g)))
 
     def _cool_k(self, mass_g: float) -> float:
         """식는 속도는 양에 따라 다르다.

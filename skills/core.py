@@ -48,6 +48,7 @@ class ConvergeSkill(Skill):
             tolerance: float | None = 0.10,
             min_interval: float = 0.1,
             on_observe=None, residual=None, guard=None, recover=None,
+            also_require=None, hold_power: int = 3,
             **_) -> SkillResult:
 
         # 목표를 '넘어선 것' 과 '맞춘 것' 은 다르다.
@@ -93,6 +94,7 @@ class ConvergeSkill(Skill):
         elapsed = 0.0
         events = []
         coasting_at = None          # 여열로 마무리하려고 끈 시점
+        holding = [False]           # 졸임은 끝났고 다른 조건을 기다리는 중
         relights = 0                # 여열이 모자라 다시 켠 횟수
         res_trust = 1.0             # 여열 예측을 얼마나 믿는가 (빗나가면 줄인다)
         cap = max_power             # 상황에 따라 낮아지는 실질 상한
@@ -168,6 +170,29 @@ class ConvergeSkill(Skill):
                         dt = 1.0
                     continue
 
+            # 목표 상태가 **하나가 아닐 수 있다.** 졸임이 끝나도 아직 안
+            # 익었으면 그 요리는 끝난 것이 아니다. 제안서는 "익힘·졸임의
+            # 판단" 을 대상으로 적었는데 코드에는 졸임만 있었다.
+            # 남은 조건이 있으면 약불로 유지하며 기다리고, 그 사이 더 졸면
+            # 물로 되돌린다.
+            if reached(cur) and also_require is not None and not also_require(s):
+                if not holding[0]:
+                    holding[0] = True
+                    actuate(hold_power)
+                    evidence.append(
+                        f"  ● {metric} 는 목표에 닿았지만 아직 끝나지 않았다 "
+                        f"→ 화력 {hold_power} 로 유지하며 기다린다. "
+                        f"너무 낮추면 식어서 익지 않는다")
+                if recover is not None and (cur < target - 2e-3
+                                            if direction == "down"
+                                            else cur > target + 2e-3):
+                    fix = recover(s, target, cur)
+                    if fix:
+                        evidence.append(f"    ~ 유지 중 {fix.get('note', '되돌림')}")
+                        s = observe(); cur = s[metric]
+                dt = min(dt, 1.0)
+                continue
+
             if reached(cur):
                 over = round(abs(target - cur), 4)
                 # 지나쳤으면 **되돌릴 수단이 있는지** 물어본다. 되돌리기는
@@ -202,7 +227,7 @@ class ConvergeSkill(Skill):
                     "target": target, "trace": trace,
                     "too_small": too_small, "events": events,
                     "coasted_from": coasting_at, "guard_notes": guard_notes,
-                    "relights": relights,
+                    "relights": relights, "held": holding[0],
                     "overshot": not ok, "overshoot": over}, evidence)
 
             # 이상 감지. 기기 사양 상한(max_power)과 **지금 이 상황에서
@@ -285,7 +310,7 @@ class ConvergeSkill(Skill):
                          "observations": i, "final": round(cur, 4),
                          "target": target, "trace": trace, "events": events,
                          "coasted_from": coasting_at, "guard_notes": guard_notes,
-                    "relights": relights, "coast_short": round(short, 4),
+                    "relights": relights, "held": holding[0], "coast_short": round(short, 4),
                          "too_small": too_small, "overshot": False,
                          "overshoot": round(short, 4)}, evidence)
                 continue
@@ -349,7 +374,7 @@ class ConvergeSkill(Skill):
                                    "progress_pct": round(progress, 1),
                                    "events": events,
                                    "coasted_from": coasting_at,
-                                   "guard_notes": guard_notes, "guard_notes": guard_notes,
+                                   "guard_notes": guard_notes, "held": holding[0], "guard_notes": guard_notes,
                                    "remaining_min": eta,
                                    "stopped": True, "recovery": why},
                            evidence)

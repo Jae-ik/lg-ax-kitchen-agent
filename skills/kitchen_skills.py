@@ -8,6 +8,9 @@ procure   : 부족분 조달 — 자동 주문 상한과 안전 필터를 지킨
 from __future__ import annotations
 from .base import Skill, SkillResult
 
+FRIDGE_TEMP_C = 4.0        # 냉장 보관 온도
+ROOM_TEMP_C = 20.0         # 물·상온 재료
+
 
 class InventorySkill(Skill):
     name = "inventory"
@@ -19,11 +22,21 @@ class InventorySkill(Skill):
     provides = ("urgent_items",)
 
     def run(self, items: list, urgency_ratio: float = 0.6, **_) -> SkillResult:
-        scored, ev = [], []
+        scored, ev, expired = [], [], []
         for i in items:
             life = max(1, i.get("shelf_life_days", 7))
             r = i.get("stored_days", 0) / life
             left = life - i.get("stored_days", 0)
+
+            # 수명이 지난 것은 '가장 급한 것' 이 아니라 **쓰면 안 되는 것**이다.
+            # 소진율만 보고 정렬하면 상한 재료가 1순위로 올라온다 —
+            # 닭고기 5일/3일이 소진율 1.67 로 맨 앞에 섰다.
+            if left <= 0:
+                expired.append({**i, "days_over": -left})
+                ev.append(f"{i['name']} {i['stored_days']}/{life}일 — "
+                          f"수명 {-left}일 지남. 쓰지 않고 버릴 대상으로 알린다")
+                continue
+
             if r >= urgency_ratio:
                 scored.append({**i, "urgency": round(r, 2), "days_left": left})
                 ev.append(f"{i['name']} {i['stored_days']}/{life}일 "
@@ -31,7 +44,8 @@ class InventorySkill(Skill):
             else:
                 ev.append(f"{i['name']} {i['stored_days']}/{life}일 (소진율 {r:.0%}) — 여유")
         scored.sort(key=lambda x: -x["urgency"])
-        return SkillResult(bool(scored), {"urgent": scored, "count": len(scored)}, ev)
+        return SkillResult(bool(scored), {"urgent": scored, "count": len(scored),
+                                          "expired": expired}, ev)
 
 
 class MenuSkill(Skill):
@@ -142,6 +156,7 @@ class PrepSkill(Skill):
         # 계량은 전부 하지만 **처음부터 냄비에 들어가는 것**은 일부다.
         # 나중에 넣을 것을 처음 질량에 더하면 졸임 기준이 틀어진다.
         later = []
+        chilled_g = [0.0]
         for ing in record.get("ingredients", []):
             if not available(ing["name"]):
                 missing.append(ing["name"])
@@ -171,6 +186,8 @@ class PrepSkill(Skill):
                 ev.append(f"{ing['name']} {w['actual_g']}g 은 질량비 "
                           f"{ing['add_at']} 에서 투입 — {ing.get('why', '')}")
                 continue
+            # 냉장 보관 중인 재료는 차다. 질량가중 평균으로 출발 온도를 낸다.
+            chilled_g[0] += w["actual_g"]
             total += w["actual_g"]
             extra += w["expected_extra_water_g"]
             if w.get("short_g"):
@@ -229,6 +246,10 @@ class PrepSkill(Skill):
                                          f"{', '.join(missing)} — 조달이 끝나지 "
                                          f"않았거나 재고가 목표의 절반에 못 미친다"
                                          if missing else None),
+                            "start_temp_c": round(
+                                (chilled_g[0] * FRIDGE_TEMP_C
+                                 + max(0.0, total - chilled_g[0]) * ROOM_TEMP_C)
+                                / max(1.0, total), 1),
                             "add_later": later,
                             "absorb_cap_g": round(absorb_g, 1),
                             "solid_g": round(solid_g, 1),

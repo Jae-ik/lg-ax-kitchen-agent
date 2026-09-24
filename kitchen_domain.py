@@ -62,6 +62,22 @@ def solid_mass(ingredients) -> float:
                for i in ingredients)
 
 
+# 익는 데 필요한 양 (온도-60) x 분. 두꺼운 고기일수록 크다.
+# 식약처 권장 중심온도 75도를 기준으로 잡은 가정이며 실측이 아니다.
+COOK_UNITS = {"닭고기": 1.05, "돼지고기": 1.2, "소고기": 0.9, "감자": 0.8,
+              "찹쌀": 1.1, "쌀": 1.1, "콩": 1.4}
+
+
+def cook_units_needed(ingredients) -> float:
+    """가장 오래 걸리는 재료가 다 익어야 끝난다."""
+    return max((COOK_UNITS.get(i["name"], 0.0) * i.get("qty_g", 0)
+                for i in ingredients), default=0.0)
+
+
+# 조리 외 단계의 고정 소요 시간(분). 설계 층의 STAGE_COSTS 와 같은 값이며,
+# 실행 층은 조리 시간만 실측하고 나머지는 이 표를 쓴다.
+FIXED_MIN = {"보관 확인": 2, "메뉴 결정": 3, "준비": 4, "세척 시작": 2}
+
 ALIAS = {
     "두부": ("두부", "연두부", "순두부", "부침두부", "손두부"),
     "닭고기": ("닭고기", "닭가슴살", "닭안심", "닭다리", "훈제닭"),
@@ -176,13 +192,23 @@ def build_tasks(constraints: dict) -> list:
     def _inventory_absorb(ctx, out):
         ctx["urgent"] = [i["name"] for i in out["urgent"]]
         ctx["days_left"] = min((i["days_left"] for i in out["urgent"]), default=99)
+        # 수명이 지난 것은 재고에서 뺀다. 목록에서 빼기만 하고 재고에 남겨 두면
+        # 메뉴 단계가 그대로 찾아 쓴다.
+        ctx["expired"] = [i["name"] for i in out.get("expired", [])]
+        if ctx["expired"]:
+            ctx["expired_note"] = (
+                "수명이 지나 쓰지 않는다: "
+                + ", ".join(f"{i['name']}({i['days_over']}일 지남)"
+                            for i in out["expired"]))
 
     def _menu_bind(ctx):
         # 내 기록이 먼저, 공개 레시피가 그다음. 같은 형태로 맞춰 함께 채점한다.
         records = list(K.RECORDS.values())
         records += [recipe_to_record(r) for r in ctx.get("recipe_pool", [])]
+        stock = [x for x in K.fridge_list_items()
+                 if x["name"] not in set(ctx.get("expired", []))]
         return {"records": records,
-                "stock": K.fridge_list_items(),
+                "stock": stock,
                 "prefer_items": ctx.get("urgent", []),
                 "require_complete": require_complete,
                 "avoid": avoid,
@@ -244,10 +270,24 @@ def build_tasks(constraints: dict) -> list:
             return next((i["qty_g"] for i in ctx["record"]["ingredients"]
                          if i["name"] == name), 150)
 
+        # 주문한 것은 **도착해야** 쓸 수 있다. 예전에는 주문 즉시 재고에
+        # 넣어서, "20분 뒤 도착" 이라 해놓고 두부 없이 조리를 시작했다.
+        # 시뮬레이터에서는 도착을 기다린 것으로 보고 그 시간을 기록한다 —
+        # 실제 기기라면 도착 알림을 받고 시작해야 한다.
+        eta = out.get("arrive_in_min", 0)
         for a in out["auto_ordered"]:
             K.fridge_add(a["name"], qty_for(a["name"]))
         ctx["order_krw"] = out["total_krw"]
-        ctx["order_eta_min"] = out.get("arrive_in_min", 0)
+        ctx["order_eta_min"] = eta
+        if out["auto_ordered"]:
+            # 집에 없는 동안 주문했으면(선제 주문) 그 시간이 이동 시간에
+            # 묻히므로 기다림이 아니다.
+            pre = constraints.get("preorder")
+            ctx["wait_for_delivery_min"] = 0 if pre else eta
+            ctx["delivery_note"] = (
+                f"이동 {constraints.get('commute_min')}분 안에 도착 — 기다림 없음"
+                if pre else
+                f"도착까지 {eta}분 기다린 뒤 조리를 시작한다")
         ctx["order_stores"] = sorted({a.get("store") for a in out["auto_ordered"]
                                       if a.get("store")})
         ctx["need_confirm"] = out["need_confirm"]
@@ -273,6 +313,7 @@ def build_tasks(constraints: dict) -> list:
         ctx["absorb_cap_g"] = out.get("absorb_cap_g") or 0.0
         ctx["solid_g"] = out.get("solid_g") or 0.0
         ctx["water_added_g"] = out.get("water_added_g") or 0.0
+        ctx["start_temp_c"] = out.get("start_temp_c", 20.0)
         ctx["scum_g"] = scum_amount(ctx["record"].get("ingredients", []))
         ctx["extra_water_g"] = out["extra_water_g"]
         ctx["prep_missing"] = out["missing"]
@@ -283,7 +324,10 @@ def build_tasks(constraints: dict) -> list:
         K.COOKER.start(ctx["mass_g"], ctx["extra_water_g"], power=3,
                        capacity_g=spec.get("capacity_g"),
                        solid_g=ctx.get("solid_g", 0.0),
-                       absorb_cap_g=ctx.get("absorb_cap_g", 0.0))
+                       absorb_cap_g=ctx.get("absorb_cap_g", 0.0),
+                       need_units=cook_units_needed(
+                           ctx["record"].get("ingredients", [])),
+                       start_temp_c=ctx.get("start_temp_c", 20.0))
 
     def _make_recover(ctx):
         """지나쳤을 때 물을 부어 되돌린다 — 다만 묽어지는 만큼만."""
@@ -427,6 +471,8 @@ def build_tasks(constraints: dict) -> list:
                 "on_observe": _make_stage_hook(ctx),
                 # 기기가 자기 여열을 안다. 제어기는 그 값을 받아 앞당겨 끈다.
                 "guard": _cook_guard, "recover": _make_recover(ctx),
+                # 졸임이 끝나도 안 익었으면 끝이 아니다
+                "also_require": lambda st: st.get("doneness", 1.0) >= 1.0,
                 "residual": lambda st: (K.COOKER.predict_residual_g()
                                         / st["initial_mass_g"]
                                         if st.get("initial_mass_g") else 0.0)}
@@ -448,6 +494,8 @@ def build_tasks(constraints: dict) -> list:
         ctx["coasted_from"] = out.get("coasted_from")
         ctx["guard_notes"] = out.get("guard_notes") or []
         ctx["relights"] = out.get("relights") or 0
+        ctx["held_for_doneness"] = out.get("held")
+        ctx["doneness"] = K.COOKER.state().get("doneness")
         # 기록은 **먹기 직전** 상태로 남긴다. 불을 끄는 순간의 값을 저장하면
         # 재현할 때 그 지점에서 또 여열이 붙어 회차마다 더 졸아든다.
         rested = K.COOKER.rest_until_still()
@@ -590,6 +638,30 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["중단"] = f"{ctx['halted_at']} 에서 멈춤 — {ctx['halt_reason']}"
         if ctx.get("guard_notes"):
             metrics["이상 감지"] = " / ".join(ctx["guard_notes"])
+        # 식사까지 실제로 걸린 시간. 제안의 핵심 주장이 "귀가 후 N분 안에
+        # 제대로 된 한 끼" 인데, 지금까지 **그것을 검증하는 곳이 없었다.**
+        # 장면 달성과 개입 횟수만 보고 있었다.
+        if ctx.get("cook_min") is not None:
+            spent = (ctx.get("wait_for_delivery_min", 0)
+                     + FIXED_MIN["보관 확인"] + FIXED_MIN["메뉴 결정"]
+                     + FIXED_MIN["준비"] + ctx["cook_min"])
+            ctx["spent_min"] = round(spent, 1)
+            metrics["식사까지(분)"] = ctx["spent_min"]
+            budget = ctx.get("time_budget_min")
+            if budget:
+                metrics["시간 예산"] = (
+                    f"{ctx['spent_min']}분 / {budget}분"
+                    + ("" if ctx["spent_min"] <= budget else "  ← 초과"))
+        if ctx.get("start_temp_c") is not None and ctx["start_temp_c"] < 18:
+            metrics["출발 온도"] = (f"{ctx['start_temp_c']}도 — 냉장 재료가 섞여 "
+                                f"상온(20도)보다 차다")
+        if ctx.get("doneness") is not None and ctx.get("held_for_doneness"):
+            metrics["익힘"] = (f"졸임이 먼저 끝나 약불로 유지하며 익혔다 "
+                            f"(익힘 {ctx['doneness']})")
+        if ctx.get("expired_note"):
+            metrics["폐기 대상"] = ctx["expired_note"]
+        if ctx.get("delivery_note"):
+            metrics["조달 대기"] = ctx["delivery_note"]
         if ctx.get("recovered"):
             metrics["되돌림"] = ctx["recovered"]
         if ctx.get("recover_declined"):

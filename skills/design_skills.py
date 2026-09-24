@@ -79,6 +79,7 @@ class SituationReadSkill(Skill):
 
         # 몇 인분을 만들지는 조리의 첫 결정이다. 가구원 수와 그 집 조리기의
         # 용량이 함께 정한다 — 4인분이 냄비에 안 들어가면 들어가는 만큼만 한다.
+        constraints["time_budget_min"] = budget
         constraints["household_size"] = persona.get("household_size", 1)
         constraints["device"] = persona.get("device")
         ev.append(f"{constraints['household_size']}인 가구 · "
@@ -266,7 +267,8 @@ class ExperienceVerifySkill(Skill):
     provides = ("verified",)
 
     def run(self, scenario: dict, plan, execute: Callable,
-            touch_baseline: int = 5, **_) -> SkillResult:
+            touch_baseline: int = 5, budget_min: int | None = None,
+            **_) -> SkillResult:
         result = execute(plan)
         touches = result.get("user_touches", 0)
         ev = [f"계획 {len(plan.steps)}단계 실행",
@@ -295,7 +297,17 @@ class ExperienceVerifySkill(Skill):
                 unmet.append(b["removes"])
             ev.append(f"{b['at']} {'달성' if hit else '미달성'} — {b['removes']} ({why})")
 
-        ok = result.get("ok", False) and not unmet
+        # 시간 예산은 제안의 핵심 주장이다. 장면이 다 달성돼도 25분 예산에
+        # 40분이 걸렸으면 그 시나리오는 성립하지 않는다.
+        m = result.get("metrics", {})
+        spent = m.get("식사까지(분)")
+        over_budget = False
+        if spent is not None and budget_min:
+            over_budget = spent > budget_min
+            ev.append(f"식사까지 {spent}분 / 예산 {budget_min}분 → "
+                      + ("예산 안" if not over_budget else "**예산 초과**"))
+
+        ok = result.get("ok", False) and not unmet and not over_budget
         ev.append(f"장면 {len(beats)}개 중 {len(beats) - len(unmet)}개 달성 → "
                   + ("시나리오 달성" if ok else "시나리오 미달성"))
 
@@ -310,4 +322,6 @@ class ExperienceVerifySkill(Skill):
             "unmet": unmet,
             "beat_check": checked,
             "metrics": result.get("metrics", {}),
+            "spent_min": spent, "budget_min": budget_min,
+            "over_budget": over_budget,
             "execution": result.get("log", [])}, ev)

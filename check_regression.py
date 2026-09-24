@@ -69,7 +69,11 @@ def main():
         if fail:
             print(f"       기대와 다름: " +
                   ", ".join(f"{k} {exp[k]}→{got[k]}" for k in fail))
-        for key in ("재고 부족", "제어 한계", "저장 전 확인"):
+        sp = v.get("spent_min"); bd = v.get("budget_min")
+        if sp is not None and bd and sp > bd:
+            print(f"       !! 시간 예산 초과: {sp}분 / {bd}분")
+            bad += 1
+        for key in ("재고 부족", "제어 한계", "저장 전 확인", "시간 예산"):
             if key in m:
                 print(f"       {key}: {m[key]}")
 
