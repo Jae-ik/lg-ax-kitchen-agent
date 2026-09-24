@@ -17,6 +17,7 @@ RECORDS = {
         "record_id": "rec_001",
         "menu": "된장찌개",
         "saved_by": "어머니",
+        "device": "본가 6인용 조리기",
         "saved_at": "2026-08-14",
         "ingredients": [                      # 준비 단계가 읽는다
             {"name": "배추", "qty_g": 200},
@@ -34,6 +35,7 @@ RECORDS = {
         "record_id": "rec_002",
         "menu": "된장찌개",
         "saved_by": "본인",
+        "device": "자취방 2인용 조리기",
         "saved_at": "2026-09-02",
         "ingredients": [
             {"name": "배추", "qty_g": 200},
@@ -51,6 +53,7 @@ RECORDS = {
         "record_id": "rec_003",
         "menu": "닭고기 표고 조림",
         "saved_by": "본인",
+        "device": "자취방 2인용 조리기",
         "saved_at": "2026-08-30",
         "ingredients": [
             {"name": "닭고기", "qty_g": 400},
@@ -302,25 +305,56 @@ def record_progress(record_id: str):
 
 
 # ══════════════════════════ 조리 기록 저장 ══════════════════════════
+OVERSHOOT_TOL = 0.02        # 목표를 이만큼 넘게 지나쳤으면 그대로 저장하지 않는다
+
+
+def record_review(base: dict, measured: dict) -> dict:
+    """저장하기 전에 이번 결과가 목표대로 됐는지 본다.
+
+    목표를 지나친 값을 그대로 다음 목표로 저장하면 **오차가 학습된다.**
+    한 번 5%p 더 졸면 다음엔 그 자리에서 또 지나칠 수 있다.
+    그래서 저장은 자동이 아니라 **사용자 판단**을 거친다 —
+    제안서가 말한 "평소 조리에 저장 한 번을 더한다" 가 이 지점이다.
+    """
+    aimed = base.get("target_mass_ratio")
+    got = measured.get("final_ratio")
+    if aimed is None or got is None:
+        return {"gap": None, "overshot": False, "suggest": "save",
+                "why": "비교할 목표가 없다"}
+    gap = round(aimed - got, 4)            # 양수면 목표보다 더 졸았다
+    over = gap > OVERSHOOT_TOL
+    return {
+        "aimed": aimed, "got": got, "gap": gap, "overshot": over,
+        "suggest": "ask" if over else "save",
+        "why": (f"목표 {aimed} 보다 {gap} 더 졸았다 — 이 결과가 마음에 들었는지 "
+                f"확인이 필요하다" if over
+                else f"목표 {aimed} 에 {abs(gap)} 이내로 도달했다"),
+    }
+
+
 def record_save(base: dict, measured: dict, saved_by: str = "본인",
-                satisfaction: int = 4) -> dict:
+                satisfaction: int = 4, device: str = "자취방 조리기",
+                actual_initial_g: float | None = None) -> dict:
     """끝난 조리를 다음 번 목표로 저장한다.
 
     제안의 핵심이 "좋아했던 결과를 기록하고 다시 쓴다" 인데, 지금까지 저장하는
     쪽이 없었다. 공개 레시피로 처음 만든 메뉴는 목표 질량비가 **가정값**이고,
     한 번 만들고 나면 그 자리를 **이번에 실제로 잰 값**이 대신해야 한다.
 
-    base      이번에 쓴 기록 (개인 기록이거나 공개 레시피에서 변환된 것)
-    measured  {"final_ratio": .., "cook_min": .., "soil_score": ..}
+    actual_initial_g 를 주면 그 값을 초기 질량으로 쓴다. 예전에는 원본 기록의
+    값을 그대로 복사해서, 재고가 모자라 적게 담았어도 "다 넣었다" 고 남았다.
     """
     rid = f"rec_{len(RECORDS) + 1:03d}"
     rec = {
         "record_id": rid,
         "menu": base.get("menu"),
         "saved_by": saved_by,
+        "device": device,                   # 어느 기기에서 만들었나
         "saved_at": "실행 시점",
         "ingredients": [dict(i) for i in base.get("ingredients", [])],
-        "initial_mass_g": base.get("initial_mass_g"),
+        # 원본을 베끼지 않고 이번에 실제로 담은 양을 남긴다
+        "initial_mass_g": (round(actual_initial_g) if actual_initial_g
+                           else base.get("initial_mass_g")),
         # 여기가 핵심 — 가정값이 아니라 이번에 잰 값이 다음 목표가 된다
         "target_mass_ratio": measured.get("final_ratio", base.get("target_mass_ratio")),
         "peak_temp_c": measured.get("peak_temp_c"),
@@ -332,3 +366,32 @@ def record_save(base: dict, measured: dict, saved_by: str = "본인",
     }
     RECORDS[rid] = rec
     return rec
+
+
+# ══════════════════════════ 기기 간 기록 이식 ══════════════════════════
+def record_import(rec: dict, to_device: str, capacity_ratio: float = 1.0,
+                  new_id: str | None = None) -> dict:
+    """다른 기기에서 만든 기록을 이 기기로 가져온다.
+
+    본가 6인용 냄비에서 만든 것을 자취방 2인용으로 옮기면 재료량은 줄여야 한다.
+    그런데 **목표 질량비는 그대로 둔다** — 비율이라 용량과 무관하기 때문이다.
+
+    이것이 '제어 입력을 재생하는' 선행 특허와 갈리는 지점이다. 화력·시간을
+    복사하면 기기가 바뀔 때 결과도 바뀐다. 우리는 목표를 상태로 두었으므로
+    기기가 알아서 다른 시간을 쓴다.
+    """
+    rid = new_id or f"rec_{len(RECORDS) + 1:03d}"
+    out = dict(rec)
+    out["record_id"] = rid
+    out["ingredients"] = [{**i, "qty_g": round(i["qty_g"] * capacity_ratio)}
+                          for i in rec.get("ingredients", [])]
+    if rec.get("initial_mass_g"):
+        out["initial_mass_g"] = round(rec["initial_mass_g"] * capacity_ratio)
+    out["cook_minutes_observed"] = None      # 시간은 기기마다 다르다 — 버린다
+    out["imported_from"] = {"record_id": rec.get("record_id"),
+                            "device": rec.get("device"),
+                            "saved_by": rec.get("saved_by"),
+                            "capacity_ratio": capacity_ratio}
+    out["device"] = to_device
+    RECORDS[rid] = out
+    return out

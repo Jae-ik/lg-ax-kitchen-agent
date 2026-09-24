@@ -1,9 +1,9 @@
 {
- "n_converge": 30,
- "n_agent": 10,
+ "n_converge": 20,
+ "n_agent": 6,
  "converge": {
   "cooker_steps": {
-   "n": 30,
+   "n": 20,
    "median": 8.0,
    "min": 8,
    "max": 8,
@@ -13,34 +13,34 @@
    "unique": 1
   },
   "cooker_final": {
-   "n": 30,
-   "median": 0.7678,
+   "n": 20,
+   "median": 0.7677,
    "min": 0.7603,
-   "max": 0.7773,
-   "sd": 0.004288900402978216,
+   "max": 0.7768,
+   "sd": 0.004586924350804148,
    "p05": 0.7608,
-   "p95": 0.7768,
-   "unique": 28
+   "p95": 0.7756,
+   "unique": 20
   },
   "dryer_steps": {
-   "n": 30,
+   "n": 20,
    "median": 11.0,
    "min": 11,
    "max": 12,
-   "sd": 0.17950549357115014,
+   "sd": 0.21794494717703367,
    "p05": 11,
    "p95": 11,
    "unique": 2
   },
   "dryer_final": {
-   "n": 30,
+   "n": 20,
    "median": 0.07685,
    "min": 0.0717,
    "max": 0.0792,
-   "sd": 0.0013655483229172893,
+   "sd": 0.0015470859704618872,
    "p05": 0.0752,
    "p95": 0.0785,
-   "unique": 22
+   "unique": 17
   }
  },
  "agent": {
@@ -48,23 +48,23 @@
    "계획 순서": {
     "unique": 1,
     "values": {
-     "inventory → recipe_source → menu → prep → converge → aftercare": 10
+     "inventory → recipe_source → menu → prep → converge → aftercare": 6
     }
    },
    "선택 메뉴": {
     "unique": 1,
     "values": {
-     "된장찌개": 10
+     "된장찌개": 6
     }
    },
    "세척 코스": {
     "unique": 1,
     "values": {
-     "강력(불림 포함)": 10
+     "강력(불림 포함)": 6
     }
    },
    "touches": {
-    "n": 10,
+    "n": 6,
     "median": 0.0,
     "min": 0,
     "max": 0,
@@ -74,7 +74,7 @@
     "unique": 1
    },
    "beats": {
-    "n": 10,
+    "n": 6,
     "median": 1.0,
     "min": 1.0,
     "max": 1.0,
@@ -84,7 +84,7 @@
     "unique": 1
    },
    "cook_min": {
-    "n": 10,
+    "n": 6,
     "median": 8.0,
     "min": 8,
     "max": 8,
@@ -98,23 +98,23 @@
    "계획 순서": {
     "unique": 1,
     "values": {
-     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 10
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 6
     }
    },
    "선택 메뉴": {
     "unique": 1,
     "values": {
-     "된장찌개": 10
+     "된장찌개": 6
     }
    },
    "세척 코스": {
     "unique": 1,
     "values": {
-     "강력(불림 포함)": 10
+     "강력(불림 포함)": 6
     }
    },
    "touches": {
-    "n": 10,
+    "n": 6,
     "median": 0.0,
     "min": 0,
     "max": 0,
@@ -124,7 +124,7 @@
     "unique": 1
    },
    "beats": {
-    "n": 10,
+    "n": 6,
     "median": 1.0,
     "min": 1.0,
     "max": 1.0,
@@ -134,7 +134,7 @@
     "unique": 1
    },
    "cook_min": {
-    "n": 10,
+    "n": 6,
     "median": 8.0,
     "min": 8,
     "max": 8,
@@ -148,23 +148,23 @@
    "계획 순서": {
     "unique": 1,
     "values": {
-     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 10
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 6
     }
    },
    "선택 메뉴": {
     "unique": 1,
     "values": {
-     "호박잎 삼계탕": 10
+     "호박잎 삼계탕": 6
     }
    },
    "세척 코스": {
     "unique": 1,
     "values": {
-     "강력(불림 포함)": 10
+     "강력(불림 포함)": 6
     }
    },
    "touches": {
-    "n": 10,
+    "n": 6,
     "median": 2.0,
     "min": 2,
     "max": 2,
@@ -174,7 +174,7 @@
     "unique": 1
    },
    "beats": {
-    "n": 10,
+    "n": 6,
     "median": 1.0,
     "min": 1.0,
     "max": 1.0,
@@ -184,7 +184,7 @@
     "unique": 1
    },
    "cook_min": {
-    "n": 10,
+    "n": 6,
     "median": 5.0,
     "min": 5,
     "max": 5,
@@ -198,23 +198,23 @@
    "계획 순서": {
     "unique": 1,
     "values": {
-     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 10
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 6
     }
    },
    "선택 메뉴": {
     "unique": 1,
     "values": {
-     "된장찌개": 10
+     "된장찌개": 6
     }
    },
    "세척 코스": {
     "unique": 1,
     "values": {
-     "강력(불림 포함)": 10
+     "강력(불림 포함)": 6
     }
    },
    "touches": {
-    "n": 10,
+    "n": 6,
     "median": 0.0,
     "min": 0,
     "max": 0,
@@ -224,7 +224,7 @@
     "unique": 1
    },
    "beats": {
-    "n": 10,
+    "n": 6,
     "median": 1.0,
     "min": 1.0,
     "max": 1.0,
@@ -234,7 +234,7 @@
     "unique": 1
    },
    "cook_min": {
-    "n": 10,
+    "n": 6,
     "median": 8.0,
     "min": 8,
     "max": 8,

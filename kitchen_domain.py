@@ -238,14 +238,27 @@ def build_tasks(constraints: dict) -> list:
         ctx["soil"] = ctx["record"]["soil_score"]
 
         # 끝난 조리를 다음 번 목표로 저장한다.
-        # 공개 레시피로 처음 만든 메뉴는 목표가 '조리법 기본값(가정)' 이었다.
-        # 이제 그 자리를 이번에 실제로 잰 값이 대신한다 — 두 번째부터 달라진다.
+        # 다만 목표를 지나친 결과를 그대로 저장하면 오차가 학습된다.
+        # 저장 전에 검토하고, 벗어났으면 사용자에게 물어야 한다.
+        measured = {"final_ratio": out["final"], "cook_min": out["steps"],
+                    "peak_temp_c": st["temp_c"],
+                    "soil_score": ctx["record"]["soil_score"]}
+        review = K.record_review(ctx["record"], measured)
+        ctx["save_review"] = review
+
+        if review["suggest"] == "ask":
+            # 시연에서는 사용자가 "그래도 저장" 을 골랐다고 본다.
+            # 만족도를 낮춰 남기므로, 더 나은 기록이 생기면 그쪽이 먼저 뽑힌다.
+            sat = 3
+            ctx["save_asked"] = review["why"]
+        else:
+            sat = 4
+
         saved = K.record_save(
-            ctx["record"],
-            {"final_ratio": out["final"], "cook_min": out["steps"],
-             "peak_temp_c": st["temp_c"], "soil_score": ctx["record"]["soil_score"]},
-            saved_by="본인", satisfaction=4)
+            ctx["record"], measured, saved_by="본인", satisfaction=sat,
+            actual_initial_g=ctx.get("mass_g"))
         ctx["saved_record_id"] = saved["record_id"]
+        ctx["saved_satisfaction"] = sat
         ctx["target_was_estimated"] = bool(ctx["record"].get("estimated"))
 
     def _aftercare_bind(ctx):
@@ -314,7 +327,11 @@ def make_executor(registry, on_step=None, seed_ctx=None):
 
         metrics = {}
         if ctx.get("saved_record_id"):
-            metrics["저장된 기록"] = ctx["saved_record_id"]
+            metrics["저장된 기록"] = (f"{ctx['saved_record_id']} "
+                                  f"(만족도 {ctx.get('saved_satisfaction')})")
+            rv = ctx.get("save_review") or {}
+            if rv.get("overshot"):
+                metrics["저장 전 확인"] = rv["why"]
             if ctx.get("target_was_estimated"):
                 metrics["목표 갱신"] = (f"가정 {ctx['record']['target_mass_ratio']} → "
                                     f"실측 {ctx['final_ratio']}")
