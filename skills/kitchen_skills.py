@@ -64,7 +64,21 @@ class MenuSkill(Skill):
         for r in records:
             need = r.get("ingredients", [])
             names = [i["name"] for i in need]
-            missing = [n for n in names if held(n) is None]
+
+            # 이름만 보면 '있다' 가 되지만, 배추 20g 으로 200g 짜리를 시작할 수는
+            # 없다. 수량까지 보고 모자란 것도 조달 대상에 넣는다.
+            missing, short = [], {}
+            for ing in need:
+                key = held(ing["name"])
+                if key is None:
+                    missing.append(ing["name"]); continue
+                # resolve 는 팬트리처럼 stock 목록 밖에 있는 것도 찾아 준다.
+                # 그럴 때는 수량을 알 수 없으므로 수량 검사를 건너뛴다.
+                have_g = (have.get(key) or {}).get("qty_g")
+                want_g = ing.get("qty_g", 0)
+                if have_g is not None and want_g and have_g < want_g:
+                    short[ing["name"]] = round(want_g - have_g)
+                    missing.append(ing["name"])
             uses = [n for n in names if (held(n) or "") in prefer]
 
             # 못 먹는 재료가 들어간 기록은 후보에서 뺀다. 조달 단계에도 같은
@@ -88,9 +102,13 @@ class MenuSkill(Skill):
             score = len(uses) * 10 - len(missing) * 3 + r.get("satisfaction", 0)
             out.append({"record_id": r["record_id"], "menu": r["menu"],
                         "saved_by": r.get("saved_by"), "missing": missing,
+                        "short_g": short,
                         "uses_urgent": uses, "blocked": [], "score": score})
             ev.append(f"{r['record_id']}({r.get('saved_by')}) 임박재료 {len(uses)}개, "
                       f"부족 {len(missing)}개 → 점수 {score}")
+            if short:
+                ev.append("  수량 부족(이름은 있으나 모자람): "
+                          + ", ".join(f"{k} {v}g" for k, v in short.items()))
         out.sort(key=lambda x: -x["score"])
         return SkillResult(bool(out), {"candidates": out, "dropped": dropped,
                                        "best": out[0] if out else None}, ev)
@@ -108,7 +126,8 @@ class PrepSkill(Skill):
     requires = ("stock_complete", "chosen_record")
     provides = ("measured",)
 
-    def run(self, record: dict, weigh, available, **_) -> SkillResult:
+    def run(self, record: dict, weigh, available,
+            min_fill_ratio: float = 0.5, **_) -> SkillResult:
         total, extra, ev, missing = 0.0, 0.0, [], []
         short = {}
         for ing in record.get("ingredients", []):
@@ -120,6 +139,17 @@ class PrepSkill(Skill):
             if not w.get("ok"):
                 missing.append(ing["name"])
                 ev.append(f"{ing['name']}: {w.get('reason')}")
+                continue
+            # 목표의 절반도 못 담았으면 그 메뉴가 아니다. 배추 20g 으로
+            # 200g 짜리 된장찌개를 시작하면 조리 단계는 그대로 성공을 보고한다.
+            # menu 가 수량까지 보므로 정상 경로에서는 여기까지 오지 않지만,
+            # 사이에 재고가 줄어드는 경우를 위해 한 번 더 막는다.
+            fill = w["actual_g"] / w["target_g"] if w.get("target_g") else 1.0
+            if fill < min_fill_ratio:
+                missing.append(ing["name"])
+                ev.append(f"{ing['name']}: 목표 {w['target_g']}g 중 "
+                          f"{w['actual_g']}g({fill:.0%})만 담김 — "
+                          f"{min_fill_ratio:.0%} 미만이라 조리로 넘기지 않는다")
                 continue
             total += w["actual_g"]
             extra += w["expected_extra_water_g"]

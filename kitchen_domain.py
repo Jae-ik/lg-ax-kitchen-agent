@@ -223,15 +223,36 @@ def build_tasks(constraints: dict) -> list:
         K.COOKER.start(ctx["mass_g"], ctx["extra_water_g"], power=3)
 
     def _converge_bind(ctx):
+        # 한 관측 주기(1분)에 증발하는 양보다 '졸일 양' 이 적으면 목표를 지나친다.
+        # 화력 3 이면 분당 약 21g 이 날아가므로, 목표 질량비에서 역산한다.
+        tgt = ctx["record"]["target_mass_ratio"]
+        # converge 가 주기를 최소 0.1분까지 줄이므로, 그 한 번에 날아가는
+        # 양(화력3 기준 약 2.1g)보다 졸일 양이 적을 때만 진짜 제어 불가다.
+        # 적응 주기를 넣기 전 기준(분당 21g의 2배)을 그대로 두었더니
+        # 실제로는 0.8462 로 잘 맞춘 실행에 경고가 붙었다 — 거짓 경보였다.
+        min_ctrl = round(2.1 / max(0.01, 1 - tgt), 1)
         return {"observe": lambda: K.COOKER.state(),
                 "actuate": K.COOKER.set_power, "step": K.COOKER.tick,
                 "metric": "mass_ratio",
                 "target": ctx["record"]["target_mass_ratio"],
                 "direction": "down", "ready_key": "temp_c", "ready_at": 92.0,
-                "max_steps": 30}
+                "max_steps": 30,
+                "min_controllable": min_ctrl, "amount_key": "initial_mass_g"}
 
     def _converge_absorb(ctx, out):
         st = K.COOKER.state()
+        over = out.get("overshoot")
+        if out.get("overshot"):
+            ctx["too_small"] = (f"목표 {ctx['record']['target_mass_ratio']} 를 "
+                                f"{over} 만큼 지나쳤다 — 도달로 세지 않는다")
+        elif out.get("too_small"):
+            ctx["too_small"] = (f"초기 {st['initial_mass_g']}g 은 최소 관측 주기로도 "
+                                f"목표를 지나칠 수 있는 양이다")
+        elif over is not None and over > 0.03:
+            # 실제로 잰 지나침이 큰 경우에만 말한다. 추정이 아니라 측정이다.
+            ctx["too_small"] = (f"목표를 {over} 지나쳤다 (허용 안) — "
+                                f"양이 적어 제어가 빡빡했다")
+        ctx["overshoot"] = over
         K.COOKER.stop()
         ctx["cook_min"] = out["steps"]
         ctx["final_ratio"] = out["final"]
@@ -337,6 +358,8 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                                     f"실측 {ctx['final_ratio']}")
         if ctx.get("prep_short"):
             metrics["재고 부족"] = ctx["prep_short"]
+        if ctx.get("too_small"):
+            metrics["제어 한계"] = ctx["too_small"]
         if "cook_min" in ctx:
             rec_min = ctx["record"].get("cook_minutes_observed")
             metrics["가열 시간(분)"] = ctx["cook_min"]

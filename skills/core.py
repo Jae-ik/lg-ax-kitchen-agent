@@ -30,6 +30,8 @@ class ConvergeSkill(Skill):
         "max_steps": "int",
         "ready_key": "str | None          준비 상태 키(예: 온도). 미달이면 세기를 올린다",
         "ready_at": "float | None",
+        "min_controllable": "float | None  이보다 적으면 관측 주기 안에 지나친다",
+        "amount_key": "str                 양을 담은 상태 키",
     }
     reusable_for = ["조리기(질량비)", "건조기(함수율)", "제습기(습도)", "에어컨(체감온도)"]
 
@@ -37,18 +39,56 @@ class ConvergeSkill(Skill):
             metric: str, target: float, direction: str = "down",
             power_key: str = "power", max_power: int = 5, max_steps: int = 30,
             ready_key: str | None = None, ready_at: float | None = None,
+            min_controllable: float | None = None,
+            amount_key: str = "initial_mass_g",
+            tolerance: float | None = 0.10,
+            min_interval: float = 0.1,
             **_) -> SkillResult:
 
+        # 목표를 '넘어선 것' 과 '맞춘 것' 은 다르다.
+        # 졸이기는 되돌릴 수 없으므로 목표 아래로 내려가면 루프는 멈춰야 하지만,
+        # 그것을 성공이라고 보고하면 안 된다. 0.78 을 노리고 0.55 로 끝난 것은
+        # 실패다. tolerance 밖으로 지나치면 ok=False 로 돌려준다.
         def reached(v):
             return v <= target if direction == "down" else v >= target
+
+        def on_target(v):
+            return tolerance is None or abs(v - target) <= tolerance
 
         start = observe()
         trace = [{"t": 0, metric: round(start[metric], 4),
                   power_key: start.get(power_key)}]
         evidence = []
 
+        # 시작하기 전에 이미 목표를 만족하는지 본다.
+        # 이 확인이 없으면 이미 도달한 상태에서도 한 단계를 돌려
+        # 불필요하게 가열한다 (에너지 낭비이자 과조리 위험).
+        # 양이 너무 적으면 한 관측 주기 안에 목표를 지나친다.
+        # 제어가 불가능한 구간이므로 먼저 알린다.
+        amount = start.get(amount_key)
+        too_small = bool(min_controllable and amount is not None
+                         and amount < min_controllable)
+        if too_small:
+            evidence.append(f"{amount_key}={amount} < 제어 가능 최소 "
+                            f"{min_controllable} — 한 주기 안에 목표를 지나칠 수 "
+                            f"있다. 관측 주기를 줄이거나 양을 늘려야 한다")
+
+        if reached(start[metric]):
+            evidence.append(f"시작 시점에 이미 {metric}={start[metric]:.4f} 로 "
+                            f"목표 {target} 을 만족 — 가열하지 않는다")
+            return SkillResult(True, {"reached": True, "steps": 0,
+                                      "final": round(start[metric], 4),
+                                      "target": target, "trace": trace,
+                                      "already": True}, evidence)
+
+        # 관측 주기는 고정이 아니다. 목표까지 한 주기도 안 남았으면 더 자주 본다.
+        # 이것이 '목표를 상태로 두는' 방식의 이점이다 — 제어 입력(시간)을
+        # 복사했다면 주기를 줄일 근거 자체가 없다.
+        dt = 1.0
+        elapsed = 0.0
         for i in range(1, max_steps + 1):
-            step(1.0)
+            step(dt)
+            elapsed += dt
             s = observe()
             cur = s[metric]
             prev = trace[-1][metric]
@@ -59,14 +99,26 @@ class ConvergeSkill(Skill):
             if abs(start[metric] - target) > 1e-9:
                 progress = abs(start[metric] - cur) / abs(start[metric] - target) * 100
 
-            trace.append({"t": i, metric: round(cur, 4),
+            trace.append({"t": round(elapsed, 2), metric: round(cur, 4),
                           power_key: s.get(power_key), "eta": eta})
-            evidence.append(f"{i}단계 {metric}={cur:.4f} 진행 {progress:.1f}% ETA {eta}")
+            evidence.append(f"{elapsed:g}분 {metric}={cur:.4f} "
+                            f"진행 {progress:.1f}% ETA {eta}")
 
             if reached(cur):
-                return SkillResult(True, {
-                    "reached": True, "steps": i, "final": round(cur, 4),
-                    "target": target, "trace": trace}, evidence)
+                over = round(abs(target - cur), 4)
+                ok = on_target(cur)
+                if not ok:
+                    evidence.append(
+                        f"목표 {target} 을 {over} 만큼 지나쳤다 "
+                        f"(허용 {tolerance}) — 도달로 세지 않는다. "
+                        f"양이 적어 한 주기 안에 넘어간 것으로 본다")
+                return SkillResult(ok, {
+                    "reached": ok, "observations": i,
+                    "steps": round(elapsed, 2),
+                    "final": round(cur, 4),
+                    "target": target, "trace": trace,
+                    "too_small": too_small,
+                    "overshot": not ok, "overshoot": over}, evidence)
 
             # 준비 상태(예: 끓는점)에 못 미치면 세기를 올린다
             if ready_key and ready_at and s.get(ready_key, 0) < ready_at:
@@ -80,7 +132,17 @@ class ConvergeSkill(Skill):
                 actuate(p)
                 evidence.append(f"  ↑ ETA {eta}분으로 김 → 세기 {p}")
 
-        return SkillResult(False, {"reached": False, "steps": max_steps,
+            # 다음 주기를 목표까지 남은 시간에 맞춘다. 남은 시간이 한 주기보다
+            # 짧으면 그만큼만 진행해야 지나치지 않는다.
+            if eta is not None and eta < dt:
+                new_dt = max(min_interval, round(eta / 2, 3))
+                if new_dt < dt:
+                    evidence.append(f"  ↓ 남은 {eta}분 < 주기 {dt}분 "
+                                    f"→ 관측 주기를 {new_dt}분으로 줄인다")
+                    dt = new_dt
+
+        return SkillResult(False, {"reached": False, "steps": round(elapsed, 2),
+                                   "observations": max_steps,
                                    "final": round(observe()[metric], 4),
                                    "target": target, "trace": trace},
                            evidence + ["목표 미도달 — 가열 중단하고 사용자 확인 필요"])

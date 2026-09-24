@@ -63,6 +63,7 @@
      "missing": [
       "두부"
      ],
+     "short_g": {},
      "uses_urgent": [
       "배추"
      ],
@@ -76,6 +77,7 @@
      "missing": [
       "두부"
      ],
+     "short_g": {},
      "uses_urgent": [
       "배추"
      ],
@@ -91,6 +93,7 @@
       "표고버섯",
       "간장"
      ],
+     "short_g": {},
      "uses_urgent": [],
      "blocked": [],
      "score": -4
@@ -104,6 +107,7 @@
     "missing": [
      "두부"
     ],
+    "short_g": {},
     "uses_urgent": [
      "배추"
     ],
@@ -160,9 +164,13 @@
   "text": "converge 실행",
   "data": {
    "reached": true,
-   "steps": 8,
-   "final": 0.7687,
-   "target": 0.78
+   "observations": 10,
+   "steps": 7.8,
+   "final": 0.7778,
+   "target": 0.78,
+   "too_small": false,
+   "overshot": false,
+   "overshoot": 0.0022
   }
  },
  {
@@ -197,9 +205,9 @@
  },
  {
   "stage": "OUTPUT",
-  "text": "된장찌개(어머니 기록) 완료 — 8분에 목표 0.78 도달",
+  "text": "된장찌개(어머니 기록) 완료 — 7.8분에 목표 0.78 도달",
   "data": {
-   "고정시간_대비_가열_절감_분": 3,
+   "고정시간_대비_가열_절감_분": 3.2,
    "세척코스": "강력(불림 포함)",
    "기본코스_대비_기대물_절감_L": 1.4,
    "사용자_터치_횟수": 0
@@ -233,9 +241,13 @@
   "text": "converge 실행",
   "data": {
    "reached": true,
-   "steps": 11,
-   "final": 0.0765,
-   "target": 0.08
+   "observations": 13,
+   "steps": 10.8,
+   "final": 0.0795,
+   "target": 0.08,
+   "too_small": false,
+   "overshot": false,
+   "overshoot": 0.0005
   }
  },
  {
@@ -270,7 +282,7 @@
  },
  {
   "stage": "OUTPUT",
-  "text": "건조 완료 — 11분에 함수율 0.0765 도달",
+  "text": "건조 완료 — 10.8분에 함수율 0.0795 도달",
   "data": {
    "세탁조코스": "표준",
    "기본코스_대비_기대물_절감_L": 0.0

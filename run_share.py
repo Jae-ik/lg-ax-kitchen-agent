@@ -21,7 +21,9 @@ import kitchen as K
 from skills import REGISTRY
 from orchestrator import banner, W
 
-CAPACITY = 1 / 3          # 본가 6인용 → 자취방 2인용
+# 용량 비율은 **적지 않는다.** 기기 제원(kitchen.DEVICES)에서 계산한다.
+# 냄비가 바뀌면 이 파일을 고칠 필요 없이 대상 기기 이름만 달라진다.
+TARGETS = ["자취방 2인용 조리기", "원룸 1인용 조리기"]
 
 
 def cook(rec: dict, label: str) -> dict:
@@ -61,32 +63,42 @@ def main():
     print(f"        초기 {src['initial_mass_g']}g  목표 질량비 "
           f"{src['target_mass_ratio']}  관측 시간 {src['cook_minutes_observed']}분")
 
-    imp = K.record_import(src, to_device="자취방 2인용 조리기",
-                          capacity_ratio=CAPACITY)
-    print(f"\n  이식  {imp['record_id']}  →  {imp['device']}  (용량 {CAPACITY:.2f}배)")
-    print(f"        재료 " + ", ".join(f"{i['name']} {i['qty_g']}g"
-                                     for i in imp["ingredients"]))
-    print(f"        초기 {imp['initial_mass_g']}g  목표 질량비 "
-          f"{imp['target_mass_ratio']}  관측 시간 {imp['cook_minutes_observed']}")
-    print(f"        └ 목표 질량비는 그대로, 조리 시간은 버렸다")
-
-    a = cook(src, "본가 6인용")
-    b = cook(imp, "자취방 2인용")
-
-    print(f"\n  {'':12} {'초기 질량':>10} {'목표':>8} {'도달 시간':>10} "
-          f"{'최종 질량비':>12} {'도달':>6}")
-    print("  " + "-" * 64)
-    for r in (a, b):
-        print(f"  {r['label']:12} {r['start_g']:>9}g {r['target']:>8} "
-              f"{r['steps']:>9}분 {r['final']:>12} {'예' if r['reached'] else '아니오':>6}")
+    rows = [cook(src, "본가 6인용(원본)")]
+    for dev in TARGETS:
+        imp = K.record_import(src, to_device=dev)       # 비율을 주지 않는다
+        print()
+        print(f"  이식  {imp['record_id']}  →  {imp['device']}")
+        print(f"        근거  {imp['scale_basis']}")
+        print(f"        재료 " + ", ".join(f"{i['name']} {i['qty_g']}g"
+                                         for i in imp["ingredients"]))
+        print(f"        초기 {imp['initial_mass_g']}g  목표 질량비 "
+              f"{imp['target_mass_ratio']}  관측 시간 {imp['cook_minutes_observed']}")
+        if imp.get("scale_warning"):
+            print(f"        ! {imp['scale_warning']}")
+        rows.append(cook(imp, dev.replace(" 조리기", "")))
 
     print()
-    if a["reached"] and b["reached"]:
-        print(f"  두 기기 모두 같은 상태({a['target']})에 도달했다.")
-        print(f"  걸린 시간은 {a['steps']}분과 {b['steps']}분으로 다르다 — "
-              f"양이 다르니 당연하다.")
+    print(f"  {'':16} {'초기 질량':>10} {'목표':>8} {'도달 시간':>10} "
+          f"{'최종 질량비':>12} {'도달':>6}")
+    print("  " + "-" * 70)
+    for r in rows:
+        print(f"  {r['label']:16} {r['start_g']:>9}g {r['target']:>8} "
+              f"{r['steps']:>9}분 {r['final']:>12} "
+              f"{'예' if r['reached'] else '아니오':>6}")
+
+    print()
+    if all(r["reached"] for r in rows):
+        print(f"  기기 {len(rows)}대가 모두 같은 상태({rows[0]['target']})에 도달했다.")
+        print("  걸린 시간은 " + " · ".join(f"{r['steps']}분" for r in rows)
+              + " 로 다르다 — 양이 다르니 당연하다.")
         print("  시간을 복사했다면 작은 냄비는 지나쳤을 것이다.")
-    print(f"\n  이식 이력: {imp['imported_from']}")
+    else:
+        for r in rows:
+            if not r["reached"]:
+                print(f"  ! {r['label']} 는 목표에 도달하지 못했다 "
+                      f"(최종 {r['final']}) — 한 주기에 지나치는 양이다")
+    print()
+    print("  용량 비율은 코드 어디에도 적혀 있지 않다 — 기기 제원에서 계산했다.")
 
 
 if __name__ == "__main__":

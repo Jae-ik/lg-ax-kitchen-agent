@@ -69,6 +69,52 @@ RECORDS = {
     },
 }
 
+# ═══════════════════════ 기기 제원 (냄비가 바뀌면) ═══════════════════════
+# 기록을 다른 기기로 옮길 때 줄일 비율을 **손으로 넣지 않으려면**, 기기가
+# 자기 제원을 알고 있어야 한다. ThinQ Connect 로 붙이면 이 표가 기기 프로필
+# 조회로 바뀐다 — 지금은 그 자리를 비워 두지 않고 값을 적어 둔 것이다.
+#
+#   servings   : 이 기기가 한 번에 만드는 기준 인분
+#   capacity_g : 넘치지 않고 담기는 물리적 상한
+DEVICES = {
+    "본가 6인용 조리기":   {"servings": 6, "capacity_g": 3000},
+    "자취방 2인용 조리기": {"servings": 2, "capacity_g": 1100},
+    "원룸 1인용 조리기":   {"servings": 1, "capacity_g": 600},
+}
+FILL_LIMIT = 0.85          # 상한의 85% 까지만 담는다 (끓어 넘침 여유)
+
+
+def device_spec(name: str) -> dict:
+    """등록되지 않은 기기는 추측하지 않는다 — 비율 1 로 두고 호출자가 알게 한다."""
+    return DEVICES.get(name, {})
+
+
+def capacity_ratio_between(from_device: str, to_device: str,
+                           initial_mass_g: float = 0.0) -> tuple:
+    """두 기기의 제원만으로 줄일 비율을 계산한다. (비율, 근거 문장)
+
+    두 가지를 함께 본다.
+      1) 인분 - 2인 가구가 6인분을 만들 이유가 없다
+      2) 물리적 상한 - 인분을 맞춰도 냄비에 안 들어가면 소용없다
+    """
+    src, dst = device_spec(from_device), device_spec(to_device)
+    if not src or not dst:
+        miss = from_device if not src else to_device
+        return 1.0, f"'{miss}' 의 제원을 모른다 — 비율 1 로 둔다(사용자 확인 필요)"
+
+    ratio = dst["servings"] / src["servings"]
+    why = (f"{from_device}({src['servings']}인분) → "
+           f"{to_device}({dst['servings']}인분) = {ratio:.3g}배")
+
+    limit = dst["capacity_g"] * FILL_LIMIT
+    if initial_mass_g and initial_mass_g * ratio > limit:
+        ratio = limit / initial_mass_g
+        why += (f" 인데 {round(initial_mass_g * dst['servings'] / src['servings'])}g 은 "
+                f"{to_device} 상한 {dst['capacity_g']}g 의 {FILL_LIMIT:.0%} 를 넘는다 "
+                f"→ {ratio:.3g}배로 더 줄임")
+    return ratio, why
+
+
 # ══════════════════════════ 냉장고 (보관) ══════════════════════════
 _FRIDGE = [
     # shelf_life_days: 품목별 보관 수명. 장류처럼 오래 두는 것과 채소를 구분한다.
@@ -159,9 +205,13 @@ def prep_weigh(name: str, target_g: int, consume: bool = True):
     item = fridge_check(name)
     if item is None:
         return {"ok": False, "reason": f"{name} 없음", "short_g": target_g}
-    want = round(target_g * random.uniform(0.97, 1.03))
+    # 소금 0.2g 처럼 1g 미만인 양념은 정수 반올림하면 0g 이 된다. 실제로
+    # 담기는데 '못 담았다' 가 되어, 뒤에서 조리가 통째로 막혔다.
+    # 저울 분해능을 0.01g 으로 두고, 1g 이상만 정수로 읽는다.
+    raw = target_g * random.uniform(0.97, 1.03)
+    want = round(raw) if target_g >= 1 else round(raw, 2)
     actual = min(item["qty_g"], want)
-    short = max(0, want - actual)
+    short = round(max(0, want - actual), 2)
     if consume:
         fridge_consume(name, actual)
     # 수분이 많은 채소만 추가 수분이 나온다. 장류·건조 재료는 해당 없음.
@@ -319,8 +369,10 @@ def record_review(base: dict, measured: dict) -> dict:
     aimed = base.get("target_mass_ratio")
     got = measured.get("final_ratio")
     if aimed is None or got is None:
-        return {"gap": None, "overshot": False, "suggest": "save",
-                "why": "비교할 목표가 없다"}
+        # 비교할 목표가 없으면 잘 됐는지 알 수 없다. 모르는 채로 저장하면
+        # 근거 없는 값이 다음 목표가 된다 — 물어보는 것이 맞다.
+        return {"gap": None, "overshot": False, "suggest": "ask",
+                "why": "비교할 목표가 없어 결과를 판정할 수 없다 — 저장 여부를 묻는다"}
     gap = round(aimed - got, 4)            # 양수면 목표보다 더 졸았다
     over = gap > OVERSHOOT_TOL
     return {
@@ -369,7 +421,7 @@ def record_save(base: dict, measured: dict, saved_by: str = "본인",
 
 
 # ══════════════════════════ 기기 간 기록 이식 ══════════════════════════
-def record_import(rec: dict, to_device: str, capacity_ratio: float = 1.0,
+def record_import(rec: dict, to_device: str, capacity_ratio: float | None = None,
                   new_id: str | None = None) -> dict:
     """다른 기기에서 만든 기록을 이 기기로 가져온다.
 
@@ -383,8 +435,30 @@ def record_import(rec: dict, to_device: str, capacity_ratio: float = 1.0,
     rid = new_id or f"rec_{len(RECORDS) + 1:03d}"
     out = dict(rec)
     out["record_id"] = rid
-    out["ingredients"] = [{**i, "qty_g": round(i["qty_g"] * capacity_ratio)}
-                          for i in rec.get("ingredients", [])]
+
+    # 비율을 주지 않으면 **기기 제원에서 계산한다.** 냄비가 바뀌어도
+    # 사람이 숫자를 넣지 않아도 되는 것이 이 함수의 요점이다.
+    if capacity_ratio is None:
+        capacity_ratio, why = capacity_ratio_between(
+            rec.get("device", ""), to_device, rec.get("initial_mass_g", 0))
+        out["scale_basis"] = why
+    else:
+        out["scale_basis"] = f"호출자가 지정한 비율 {capacity_ratio:.3g}배"
+
+    # 크게 줄이면 반올림으로 0g 이 되는 재료가 생긴다. 된장 0g 인 된장찌개는
+    # 된장찌개가 아니다. 최소 1g 을 보장하고, 그런 항목을 기록에 남긴다.
+    rounded, floored = [], []
+    for i in rec.get("ingredients", []):
+        q = i["qty_g"] * capacity_ratio
+        if q < 1:
+            floored.append(i["name"])
+            q = 1
+        rounded.append({**i, "qty_g": round(q)})
+    out["ingredients"] = rounded
+    if floored:
+        out["scale_warning"] = (f"용량을 {capacity_ratio:.3g}배로 줄이면서 "
+                                f"{', '.join(floored)} 이(가) 1g 미만이 되어 "
+                                f"1g 으로 올렸다 — 맛이 달라질 수 있다")
     if rec.get("initial_mass_g"):
         out["initial_mass_g"] = round(rec["initial_mass_g"] * capacity_ratio)
     out["cook_minutes_observed"] = None      # 시간은 기기마다 다르다 — 버린다
