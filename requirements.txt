@@ -1,0 +1,6 @@
+# 제출 경로(run_design.py, run_demo.py, measure_variance.py)는
+# 파이썬 표준 라이브러리만 사용한다. 설치할 것이 없다.
+#
+# 아래는 선택 사항이다.
+#   anthropic>=1.0    agent.py (LLM 이 스킬을 고르는 경로) 에만 필요.
+#                     API 키가 없어 실행 검증되지 않았으며 제출 경로가 아니다.

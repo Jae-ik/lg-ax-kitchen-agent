@@ -1,0 +1,128 @@
+# UX 시나리오 설계 Agent
+
+**팀 독립선언문 · LG전자–국립창원대 AX 해커톤 Theme B (UX/UI 시나리오 설계자)**
+
+고객 상황을 입력하면 **UX 시나리오를 생성하고, 그것을 실제로 실행해 검증한다.**
+지시를 받아 가전을 돌리는 것이 아니라, 시나리오 설계라는 **직무를 반복 수행한다.**
+
+```
+입력: 고객 상황          출력: UX 시나리오 + 실행 결과
+Goal → Plan → Tool·Skill → Execute → Evaluate → Output
+```
+
+## 실행
+
+```bash
+python run_design.py            # 고객 상황 3건 → 시나리오 3건 (주 산출물)
+python run_design.py p1_야근    # 한 상황만
+python run_demo.py              # 실행 층만 단독 — 스킬 재사용 실증
+```
+
+API 키가 없어도 전부 동작한다. 계획은 LLM이 아니라 **전제조건 플래너**가 계산한다.
+
+## 구조
+
+```
+run_design.py        설계 Agent — 6단계 루프
+planner.py           전제조건·효과 기반 플래너. 호출 순서를 적어두지 않고 계산한다
+personas.py          고객 상황 3종 (입력)
+kitchen_domain.py    도메인 바인딩 — 여기만 바꾸면 세탁실·욕실이 된다
+skills/
+  design_skills.py   설계 층 4  situation_read · scenario_draft · flow_design · experience_verify
+  data_skills.py     실행 층 1  recipe_source  (자료 수집·선별)
+  kitchen_skills.py  실행 층 4  inventory · menu · procure · prep
+  core.py            실행 층 2  converge · aftercare  (기기 무관, 주입 방식)
+  base.py            Skill 인터페이스 + Registry
+fetch_data.py        공개 자료 수집 (식약처 레시피 DB) → data/recipes.json
+recipe_parse.py      재료 문자열 파싱 (표기 두 종류 처리)
+kitchen.py / dryer.py  기기 시뮬레이터 (ThinQ Connect API 로 교체 가능)
+```
+
+**설계 층은 실행 층을 import 하지 않는다.** 실행 함수를 주입받는다.
+
+## 핵심 결과
+
+상황이 다르면 **계획 자체가 달라진다.** 순서는 코드 어디에도 적혀 있지 않다.
+
+| 고객 상황 | 계산된 가전 작업 순서 | 선택 메뉴 | 개입 | 장면 |
+|---|---|---|---|---|
+| 야근 1인 가구 | inventory → recipe_source → menu → prep → converge → aftercare | 된장찌개 (저장 기록) | 0회 | 4/4 |
+| 맞벌이 2인 가구 | … → **procure** → prep → converge → aftercare | 된장찌개 (저장 기록) | 0회 | 4/4 |
+| 알레르기 4인 가구 | … → **procure** → prep → converge → aftercare | 호박잎 삼계탕 (**공개 레시피**) | 2회 | 5/5 |
+
+1인 가구는 귀가 후 25분뿐이라 조달(20분 예상)이 예산을 넘는다.
+Agent가 `stock_complete`를 이미 성립한 사실로 두자 플래너가 **`procure`를 스스로 제외**했다.
+알레르기 가구는 저장 기록에 쓸 것이 없어 **공개 레시피 48건 중에서** 임박한 닭고기를 쓰는 것을 골랐고,
+처음 사는 품목 2건은 자동 주문하지 않고 물었다(개입 2회 = 설계된 정지).
+
+## 데이터 — 합성이 아닌 공개 자료
+
+```bash
+python fetch_data.py            # 캐시가 없을 때만 수집
+python fetch_data.py --refresh  # 다시 받기
+```
+
+식약처 **조리식품의 레시피 DB(COOKRCP01)** 100건을 받아 `data/recipes.json`에 캐시한다.
+키 없이 공개 `sample` 키로 동작하고, 무료 발급키(`MFDS_KEY`)를 넣으면 전체 1,156건을 받는다.
+**평소 실행에는 네트워크가 필요 없다** — 소켓을 차단해도 끝까지 돈다.
+
+알레르기·기피 25건 + 나트륨 상한 27건을 걸러 48건을 후보로 남긴 것이 실제 실행 결과다.
+
+## 스킬 재사용 (실증)
+
+같은 코드로 다른 기기에 돌린 결과 — `run_demo.py`
+
+| Skill | 대상 1 | 대상 2 |
+|---|---|---|
+| `converge` | 조리기 질량비 0.78 → **8단계** | 건조기 함수율 0.08 → **11단계** |
+| `aftercare` | 식기세척기 `강력(불림 포함)` | 세탁기 `표준` |
+
+바꾼 것은 주입한 관측·액추에이터 함수와 코스 프로파일뿐이다.
+
+## 흔들림 측정
+
+```bash
+python measure_variance.py 500 200   # → variance.json
+```
+
+단일 실행 수치를 근거로 쓰지 않으려고 시드를 바꿔 반복했다.
+
+| | 결과 |
+|---|---|
+| 조리기 8단계 | 500회 중 **499회** |
+| 건조기 11단계 | 500회 중 **486회** |
+| 계획 순서 | 600회(200×3상황) **전부 불변** |
+| 최종 질량비 | 0.7295~0.7796 — **목표 0.78을 관측 주기만큼 지나친다** |
+
+## 무엇이 진짜이고 무엇이 대체인가
+
+| 구성 | 상태 |
+|---|---|
+| 설계 루프 · 플래너 · 스킬 레지스트리 | **진짜** — 키 없이 동작 |
+| 계획 계산 (전제조건 역추적 + 위상 정렬) | **진짜** — `planner.py` |
+| 시나리오–실행 대조 검증 | **진짜** — 장면마다 `verified_by` 스킬 로그 확인 |
+| 기기 API 규격 | **진짜** — ThinQ Connect 로 교체 가능한 형태 |
+| 자료 수집 (`recipe_source`) | **진짜** — 식약처 공개 API 실호출, 100건 캐시 |
+| 기기 내부 동작 | **시뮬레이터** — 증발·건조는 단순 1차 모델, 실측 아님 |
+| 공개 레시피 100건 | **실제 공공 자료** (식약처 COOKRCP01) |
+| 개인 조리 기록 3건 | **합성 데이터** — 실측 교체 필요 |
+| 공개 레시피의 목표 질량비·오염도 | **가정** — 조리법별 기본값, 첫 조리 실측으로 대체되는 구조 |
+| LLM 기반 계획 (`agent.py`) | **미검증** — API 키 없음. 현재 제출 경로가 아니다 |
+
+## 비용과 키
+
+제출 경로(`run_design.py`)는 **표준 라이브러리만** 쓴다. `pip install` 대상 0개, 유료 API 0개.
+
+| 항목 | 키 | 비용 |
+|---|---|---|
+| 실행 전체 | 불필요 | 0원 |
+| 식약처 레시피 DB | 공개 `sample` 키로 동작 / 발급키는 무료 | 0원 |
+| ThinQ Connect | 교체 경로로만 문서화, 현재 미사용 | — |
+| Claude API | `agent.py` 전용, 제출 경로 아님 | (유료, 미사용) |
+
+## 산출물
+
+- `AGENT_정의서.md` — 역할·사용자·Input/Process/Output
+- `재사용_방안.md` — 실증/구조/설계 3등급으로 구분
+- `scenarios.json` · `trace_design.json` — 실행 결과와 단계별 로그
+- `data/recipes.json` — 수집한 공개 자료 (출처·인증 방식 기록 포함)

@@ -1,0 +1,198 @@
+{
+ "n_converge": 500,
+ "n_agent": 200,
+ "converge": {
+  "cooker_steps": {
+   "n": 500,
+   "median": 8.0,
+   "min": 8,
+   "max": 9,
+   "sd": 0.044676615807377355,
+   "p05": 8,
+   "p95": 8,
+   "unique": 2
+  },
+  "cooker_final": {
+   "n": 500,
+   "median": 0.76655,
+   "min": 0.7295,
+   "max": 0.7796,
+   "sd": 0.0053885715212846534,
+   "p05": 0.7585,
+   "p95": 0.7748,
+   "unique": 188
+  },
+  "dryer_steps": {
+   "n": 500,
+   "median": 11.0,
+   "min": 11,
+   "max": 12,
+   "sd": 0.16497272501841023,
+   "p05": 11,
+   "p95": 11,
+   "unique": 2
+  },
+  "dryer_final": {
+   "n": 500,
+   "median": 0.0776,
+   "min": 0.0716,
+   "max": 0.08,
+   "sd": 0.0014371027938181733,
+   "p05": 0.0751,
+   "p95": 0.0794,
+   "unique": 65
+  }
+ },
+ "agent": {
+  "p1_야근": {
+   "계획 순서": {
+    "unique": 1,
+    "values": {
+     "inventory → recipe_source → menu → prep → converge → aftercare": 200
+    }
+   },
+   "선택 메뉴": {
+    "unique": 1,
+    "values": {
+     "된장찌개": 200
+    }
+   },
+   "세척 코스": {
+    "unique": 1,
+    "values": {
+     "강력(불림 포함)": 200
+    }
+   },
+   "touches": {
+    "n": 200,
+    "median": 0.0,
+    "min": 0,
+    "max": 0,
+    "sd": 0.0,
+    "p05": 0,
+    "p95": 0,
+    "unique": 1
+   },
+   "beats": {
+    "n": 200,
+    "median": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "sd": 0.0,
+    "p05": 1.0,
+    "p95": 1.0,
+    "unique": 1
+   },
+   "cook_min": {
+    "n": 200,
+    "median": 8.0,
+    "min": 8,
+    "max": 9,
+    "sd": 0.07053367989832943,
+    "p05": 8,
+    "p95": 8,
+    "unique": 2
+   }
+  },
+  "p2_맞벌이": {
+   "계획 순서": {
+    "unique": 1,
+    "values": {
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 200
+    }
+   },
+   "선택 메뉴": {
+    "unique": 1,
+    "values": {
+     "된장찌개": 200
+    }
+   },
+   "세척 코스": {
+    "unique": 1,
+    "values": {
+     "강력(불림 포함)": 200
+    }
+   },
+   "touches": {
+    "n": 200,
+    "median": 0.0,
+    "min": 0,
+    "max": 0,
+    "sd": 0.0,
+    "p05": 0,
+    "p95": 0,
+    "unique": 1
+   },
+   "beats": {
+    "n": 200,
+    "median": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "sd": 0.0,
+    "p05": 1.0,
+    "p95": 1.0,
+    "unique": 1
+   },
+   "cook_min": {
+    "n": 200,
+    "median": 8.0,
+    "min": 8,
+    "max": 9,
+    "sd": 0.07053367989832943,
+    "p05": 8,
+    "p95": 8,
+    "unique": 2
+   }
+  },
+  "p3_알레르기": {
+   "계획 순서": {
+    "unique": 1,
+    "values": {
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 200
+    }
+   },
+   "선택 메뉴": {
+    "unique": 1,
+    "values": {
+     "호박잎 삼계탕": 200
+    }
+   },
+   "세척 코스": {
+    "unique": 1,
+    "values": {
+     "강력(불림 포함)": 200
+    }
+   },
+   "touches": {
+    "n": 200,
+    "median": 2.0,
+    "min": 2,
+    "max": 2,
+    "sd": 0.0,
+    "p05": 2,
+    "p95": 2,
+    "unique": 1
+   },
+   "beats": {
+    "n": 200,
+    "median": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "sd": 0.0,
+    "p05": 1.0,
+    "p95": 1.0,
+    "unique": 1
+   },
+   "cook_min": {
+    "n": 200,
+    "median": 5.0,
+    "min": 5,
+    "max": 5,
+    "sd": 0.0,
+    "p05": 5,
+    "p95": 5,
+    "unique": 1
+   }
+  }
+ }
+}

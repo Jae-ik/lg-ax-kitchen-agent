@@ -1,0 +1,275 @@
+[
+ {
+  "stage": "SKILL",
+  "text": "inventory 선택 — 보관 중인 항목에서 곧 소진해야 할 것을 찾는다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "inventory 실행",
+  "data": {
+   "urgent": [
+    {
+     "name": "배추",
+     "qty_g": 320,
+     "stored_days": 5,
+     "shelf_life_days": 7,
+     "urgency": 0.71,
+     "days_left": 2
+    }
+   ],
+   "count": 1
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "GOAL",
+  "text": "소진 임박 재료를 2일 안에 사용한다 — 배추",
+  "data": {
+   "trigger": "재고 상태 변화",
+   "user_request": null
+  }
+ },
+ {
+  "stage": "PLAN",
+  "text": "메뉴 결정 → 부족분 조달 → 조리 → 세척",
+  "data": {
+   "skills": [
+    "menu",
+    "procure",
+    "converge",
+    "aftercare"
+   ]
+  }
+ },
+ {
+  "stage": "SKILL",
+  "text": "menu 선택 — 재고와 저장된 조리 기록을 대조해 실행 가능한 후보를 만든다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "menu 실행",
+  "data": {
+   "candidates": [
+    {
+     "record_id": "rec_001",
+     "menu": "된장찌개",
+     "saved_by": "어머니",
+     "missing": [
+      "두부"
+     ],
+     "uses_urgent": [
+      "배추"
+     ],
+     "blocked": [],
+     "score": 12
+    },
+    {
+     "record_id": "rec_002",
+     "menu": "된장찌개",
+     "saved_by": "본인",
+     "missing": [
+      "두부"
+     ],
+     "uses_urgent": [
+      "배추"
+     ],
+     "blocked": [],
+     "score": 11
+    },
+    {
+     "record_id": "rec_003",
+     "menu": "닭고기 표고 조림",
+     "saved_by": "본인",
+     "missing": [
+      "닭고기",
+      "표고버섯",
+      "간장"
+     ],
+     "uses_urgent": [],
+     "blocked": [],
+     "score": -4
+    }
+   ],
+   "dropped": [],
+   "best": {
+    "record_id": "rec_001",
+    "menu": "된장찌개",
+    "saved_by": "어머니",
+    "missing": [
+     "두부"
+    ],
+    "uses_urgent": [
+     "배추"
+    ],
+    "blocked": [],
+    "score": 12
+   }
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "procure 선택 — 부족한 항목을 조달한다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "procure 실행",
+  "data": {
+   "auto_ordered": [
+    {
+     "name": "두부",
+     "price_krw": 2800
+    }
+   ],
+   "need_confirm": [],
+   "total_krw": 2800
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "계량 완료 — 총 620g (기록 620g), 추가 수분 19.9g 예상",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "converge 선택 — 관측값을 목표값에 도달시킨다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "converge 실행",
+  "data": {
+   "reached": true,
+   "steps": 8,
+   "final": 0.7687,
+   "target": 0.78
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "aftercare 선택 — 직전 작업에서 나온 오염도로 사후처리 코스를 고른다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "aftercare 실행",
+  "data": {
+   "course": "강력(불림 포함)",
+   "minutes": 145,
+   "temp_c": 70,
+   "water_l": 16.0,
+   "rewash_prob": 0.05,
+   "expected_water_l": 16.8,
+   "baseline_course": "표준",
+   "baseline_expected_water_l": 18.2,
+   "saved_l": 1.4
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "OUTPUT",
+  "text": "된장찌개(어머니 기록) 완료 — 8분에 목표 0.78 도달",
+  "data": {
+   "고정시간_대비_가열_절감_분": 3,
+   "세척코스": "강력(불림 포함)",
+   "기본코스_대비_기대물_절감_L": 1.4,
+   "사용자_터치_횟수": 0
+  }
+ },
+ {
+  "stage": "GOAL",
+  "text": "빨래 함수율을 8%까지 낮춘다",
+  "data": {
+   "trigger": "세탁 종료 이벤트",
+   "user_request": null
+  }
+ },
+ {
+  "stage": "PLAN",
+  "text": "건조 → 세탁조 관리",
+  "data": {
+   "skills": [
+    "converge",
+    "aftercare"
+   ]
+  }
+ },
+ {
+  "stage": "SKILL",
+  "text": "converge 선택 — 관측값을 목표값에 도달시킨다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "converge 실행",
+  "data": {
+   "reached": true,
+   "steps": 11,
+   "final": 0.0765,
+   "target": 0.08
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "SKILL",
+  "text": "aftercare 선택 — 직전 작업에서 나온 오염도로 사후처리 코스를 고른다",
+  "data": null
+ },
+ {
+  "stage": "EXECUTE",
+  "text": "aftercare 실행",
+  "data": {
+   "course": "표준",
+   "minutes": 80,
+   "temp_c": 40,
+   "water_l": 48.0,
+   "rewash_prob": 0.05,
+   "expected_water_l": 51.2,
+   "baseline_course": "표준",
+   "baseline_expected_water_l": 51.2,
+   "saved_l": 0.0
+  }
+ },
+ {
+  "stage": "EVALUATE",
+  "text": "근거",
+  "data": null
+ },
+ {
+  "stage": "OUTPUT",
+  "text": "건조 완료 — 11분에 함수율 0.0765 도달",
+  "data": {
+   "세탁조코스": "표준",
+   "기본코스_대비_기대물_절감_L": 0.0
+  }
+ }
+]

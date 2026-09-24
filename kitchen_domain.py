@@ -1,0 +1,298 @@
+# -*- coding: utf-8 -*-
+"""주방 도메인 바인딩.
+
+스킬은 도메인을 모른다. 여기서 "이 주방에서 그 스킬을 어떻게 쓰는지" 를 선언한다.
+  · 전제조건과 효과 (플래너가 순서를 계산하는 근거)
+  · 컨텍스트에서 스킬 인자를 만드는 법
+  · 스킬 출력을 컨텍스트에 반영하는 법
+
+이 파일만 바꾸면 같은 스킬 묶음을 세탁실·욕실에 그대로 옮길 수 있다.
+"""
+from __future__ import annotations
+import json
+import pathlib
+
+import kitchen as K
+from planner import Task
+from recipe_parse import contains_any
+
+RECIPE_CACHE = pathlib.Path(__file__).parent / "data" / "recipes.json"
+
+# 공개 레시피에는 "얼마나 졸일지"와 "얼마나 눌어붙을지"가 없다.
+# 개인 기록이 없는 첫 조리에서 쓸 보수적 기본값이다. 실측이 아니라 **가정**이며,
+# 한 번 조리하고 나면 그 세션의 측정값으로 대체된다.
+METHOD_DEFAULT = {          # 조리법: (목표 질량비, 예상 오염도)
+    "끓이기": (0.85, 0.55), "굽기": (0.92, 0.70), "찌기": (0.97, 0.30),
+    "볶기": (0.90, 0.60), "튀기기": (0.95, 0.75), "기타": (0.95, 0.40),
+}
+
+
+# 같은 재료를 부르는 다른 이름들. 냉장고 품목명 → 자료에서 쓰이는 표기.
+# 공개 자료를 쓰면 반드시 생기는 문제라 도메인 지식으로 따로 둔다.
+ALIAS = {
+    "두부": ("두부", "연두부", "순두부", "부침두부", "손두부"),
+    "닭고기": ("닭고기", "닭가슴살", "닭안심", "닭다리", "훈제닭"),
+    "돼지고기": ("돼지고기", "삼겹살", "목살", "다짐육"),
+    "대파": ("대파", "쪽파", "실파"),
+    "배추": ("배추", "배춧잎", "알배추", "절임배추"),
+    "간장": ("간장", "저염간장", "진간장", "국간장", "양조간장"),
+    "된장": ("된장", "저염된장", "재래된장"),
+    "애호박": ("애호박", "호박"),
+    "표고버섯": ("표고버섯", "건표고", "표고"),
+}
+
+
+# 늘 있다고 보는 상비품. 이것까지 '부족'으로 세면 조미료가 많은 레시피가
+# 부당하게 밀린다. 실제 제품에서는 사용자가 등록하거나 소모량으로 추정한다.
+PANTRY = {"소금", "후춧가루", "설탕", "식용유", "참기름", "물", "밀가루",
+          "녹말가루", "식초", "고춧가루", "마늘", "생강"}
+
+
+def pantry_stock() -> list:
+    """상비품을 재고 항목으로 만든다. 가구를 바꿔도 이것은 늘 있다고 본다."""
+    return [{"name": n, "qty_g": 500, "stored_days": 30,
+             "shelf_life_days": 720} for n in sorted(PANTRY)]
+
+
+def resolve_stock(ing_name: str, have: dict):
+    """자료의 재료명이 재고의 어떤 품목인지 찾는다. 없으면 None."""
+    if ing_name in have:
+        return ing_name
+    for stock_name in have:
+        for alias in ALIAS.get(stock_name, (stock_name,)):
+            if alias in ing_name or ing_name in alias:
+                return stock_name
+    for p in PANTRY:
+        if p in ing_name:
+            return p          # 상비품은 보유로 본다 (임박 목록에는 없으므로 점수에 기여하지 않는다)
+    return None
+
+
+def load_recipes() -> dict:
+    """캐시를 읽는다. 없으면 빈 묶음을 준다 (수집은 fetch_data.py 가 한다)."""
+    if not RECIPE_CACHE.exists():
+        return {"source": "(캐시 없음 — python fetch_data.py 를 먼저 실행)",
+                "key_used": "-", "recipes": []}
+    return json.loads(RECIPE_CACHE.read_text(encoding="utf-8"))
+
+
+def recipe_to_record(r: dict) -> dict:
+    """공개 레시피를 조리 기록과 같은 형태로 맞춘다.
+
+    개인 기록(satisfaction 1~5)과 달리 satisfaction 을 0 으로 둔다.
+    그래서 같은 조건이면 **내 기록이 공개 레시피보다 먼저 선택된다.**
+    """
+    ratio, soil = METHOD_DEFAULT.get(r.get("method"), METHOD_DEFAULT["기타"])
+    total = sum(i["qty_g"] for i in r["ingredients"])
+    return {"record_id": f"pub_{r['recipe_id']}", "menu": r["menu"],
+            "saved_by": "공개 레시피", "ingredients": r["ingredients"],
+            "initial_mass_g": round(total), "target_mass_ratio": ratio,
+            "cook_minutes_observed": None, "soil_score": soil,
+            "satisfaction": 0, "estimated": True,
+            "sodium_mg": r.get("sodium_mg"), "kcal": r.get("kcal")}
+
+# 취급 품목과 구매 이력 — 실제로는 제휴 장보기 서비스에서 온다
+CATALOG = {"두부": 2800, "대파": 1900, "표고버섯": 4500, "간장": 3200,
+           "된장": 5400, "닭고기": 9800, "한우등심": 32000,
+           # 레시피 자료에 자주 나오는 품목. 가격은 **추정값**이며
+           # 실제로는 제휴 장보기 서비스의 시세를 받아야 한다.
+           "찹쌀": 4200, "미나리": 2500, "양파": 2200, "당근": 2300,
+           "감자": 3100, "애호박": 1800, "배추": 4800, "무": 2600,
+           "달걀": 6500, "우유": 2900, "시금치": 2700, "오이": 1700}
+KNOWN_ITEMS = ["두부", "대파", "간장", "된장", "닭고기", "양파", "당근",
+               "감자", "달걀", "배추", "애호박"]        # 이전에 산 적 있는 품목
+AUTO_LIMIT_KRW = 15000                                # 1회 자동 주문 상한
+
+
+def build_tasks(constraints: dict) -> list:
+    """상황에서 나온 제약을 반영해 이 도메인의 작업 목록을 만든다."""
+    avoid = list(constraints.get("avoid", []))
+    require_complete = bool(constraints.get("skip_procurement"))
+
+    def _recipe_bind(ctx):
+        return {"load": load_recipes, "match": contains_any, "avoid": avoid,
+                "max_sodium_mg": constraints.get("max_sodium_mg"),
+                "methods": None}
+
+    def _recipe_absorb(ctx, out):
+        ctx["recipe_pool"] = out["recipe_pool"]
+        ctx["recipe_source"] = out["source"]
+        ctx["recipe_stats"] = {"적재": out["loaded"], "후보": out["kept"],
+                               "알레르기제외": len(out["blocked_allergy"]),
+                               "나트륨제외": len(out["blocked_sodium"])}
+
+    def _inventory_bind(ctx):
+        return {"items": K.fridge_list_items(), "urgency_ratio": 0.6}
+
+    def _inventory_absorb(ctx, out):
+        ctx["urgent"] = [i["name"] for i in out["urgent"]]
+        ctx["days_left"] = min((i["days_left"] for i in out["urgent"]), default=99)
+
+    def _menu_bind(ctx):
+        # 내 기록이 먼저, 공개 레시피가 그다음. 같은 형태로 맞춰 함께 채점한다.
+        records = list(K.RECORDS.values())
+        records += [recipe_to_record(r) for r in ctx.get("recipe_pool", [])]
+        return {"records": records,
+                "stock": K.fridge_list_items(),
+                "prefer_items": ctx.get("urgent", []),
+                "require_complete": require_complete,
+                "avoid": avoid,
+                "resolve": resolve_stock}
+
+    def _menu_absorb(ctx, out):
+        best = out["best"]
+        if best is None:
+            ctx["record"] = None
+            ctx["missing"] = []
+            return
+        rid = best["record_id"]
+        if rid.startswith("pub_"):
+            # 공개 레시피가 뽑혔다 — 개인 기록이 없는 메뉴다.
+            src = next(r for r in ctx["recipe_pool"]
+                       if f"pub_{r['recipe_id']}" == rid)
+            ctx["record"] = recipe_to_record(src)
+        else:
+            ctx["record"] = K.record_get(rid)
+        ctx["missing"] = list(best["missing"])
+        ctx["menu_name"] = best["menu"]
+        ctx["menu_from"] = "공개 레시피" if rid.startswith("pub_") else "저장된 기록"
+
+    def _procure_bind(ctx):
+        return {"missing": ctx.get("missing", []), "catalog": CATALOG,
+                "known_items": KNOWN_ITEMS, "avoid": avoid,
+                "auto_limit_krw": AUTO_LIMIT_KRW}
+
+    def _procure_absorb(ctx, out):
+        def qty_for(name):
+            return next((i["qty_g"] for i in ctx["record"]["ingredients"]
+                         if i["name"] == name), 150)
+
+        for a in out["auto_ordered"]:
+            K.fridge_add(a["name"], qty_for(a["name"]))
+        ctx["order_krw"] = out["total_krw"]
+        ctx["need_confirm"] = out["need_confirm"]
+        # 되돌릴 수 없는 행동을 막은 만큼 사용자가 직접 확인해야 한다
+        ctx["touches"] = ctx.get("touches", 0) + len(out["need_confirm"])
+
+        # 시연에서는 사용자가 그 확인에 동의했다고 보고 진행한다.
+        # 실제 제품에서는 여기서 멈추고 응답을 기다린다. 동의를 가정한 것이지
+        # 자동으로 주문한 것이 아니며, 개입 횟수에는 그대로 남는다.
+        approved = [c["name"] for c in out["need_confirm"] if c["name"] in CATALOG]
+        for name in approved:
+            K.fridge_add(name, qty_for(name))
+        ctx["approved_after_ask"] = approved
+
+    def _prep_bind(ctx):
+        return {"record": ctx["record"], "weigh": K.prep_weigh,
+                "available": lambda n: K.fridge_check(n) is not None}
+
+    def _prep_absorb(ctx, out):
+        ctx["mass_g"] = out["total_mass_g"]
+        ctx["extra_water_g"] = out["extra_water_g"]
+        ctx["prep_missing"] = out["missing"]
+
+    def _converge_setup(ctx):
+        K.COOKER.start(ctx["mass_g"], ctx["extra_water_g"], power=3)
+
+    def _converge_bind(ctx):
+        return {"observe": lambda: K.COOKER.state(),
+                "actuate": K.COOKER.set_power, "step": K.COOKER.tick,
+                "metric": "mass_ratio",
+                "target": ctx["record"]["target_mass_ratio"],
+                "direction": "down", "ready_key": "temp_c", "ready_at": 92.0,
+                "max_steps": 30}
+
+    def _converge_absorb(ctx, out):
+        K.COOKER.stop()
+        ctx["cook_min"] = out["steps"]
+        ctx["final_ratio"] = out["final"]
+        ctx["soil"] = ctx["record"]["soil_score"]
+
+    def _aftercare_bind(ctx):
+        return {"soil_score": ctx["soil"], "profile": "dishwasher"}
+
+    def _aftercare_absorb(ctx, out):
+        ctx["course"] = out["course"]
+        ctx["water_expected_l"] = out["expected_water_l"]
+        ctx["water_saved_l"] = out["saved_l"]
+
+    return [
+        Task(skill="recipe_source", provides=("recipe_pool",),
+             bind=_recipe_bind, absorb=_recipe_absorb,
+             note="먹을 수 있는 것만 남긴 후보군을 공개 자료에서 먼저 만든다"),
+        Task(skill="inventory", provides=("urgent_items",),
+             bind=_inventory_bind, absorb=_inventory_absorb,
+             note="무엇이 곧 상하는지 알아야 목표가 생긴다"),
+        Task(skill="menu", requires=("urgent_items", "recipe_pool"),
+             provides=("chosen_record", "missing_items"),
+             bind=_menu_bind, absorb=_menu_absorb,
+             note="임박 재료를 쓰는 기록을 골라야 버리는 것이 줄어든다"),
+        Task(skill="procure", requires=("missing_items",),
+             provides=("stock_complete",),
+             bind=_procure_bind, absorb=_procure_absorb,
+             note="부족분이 있으면 재고를 먼저 채워야 조리가 가능하다"),
+        Task(skill="prep", requires=("stock_complete", "chosen_record"),
+             provides=("measured",),
+             bind=_prep_bind, absorb=_prep_absorb,
+             note="계량과 예상 수분을 넘겨야 조리가 같은 출발점에서 시작한다"),
+        Task(skill="converge", requires=("measured",),
+             provides=("cooked", "soil_score"),
+             setup=_converge_setup, bind=_converge_bind, absorb=_converge_absorb,
+             note="시간이 아니라 목표 상태로 조리를 끝낸다"),
+        Task(skill="aftercare", requires=("soil_score",), provides=("cleaned",),
+             bind=_aftercare_bind, absorb=_aftercare_absorb,
+             note="조리기만 아는 눌어붙음 정도를 세척기에 넘긴다"),
+    ]
+
+
+def make_executor(registry, on_step=None):
+    """계획을 실제로 실행하는 함수를 만든다.
+
+    experience_verify 스킬에 주입된다. 설계 스킬이 실행 층을 import 하지 않게
+    하려는 것이다 — 스킬끼리는 여전히 서로를 모른다.
+    """
+    def execute(plan):
+        ctx, log, ok = {"touches": 0}, [], True
+        for i, t in enumerate(plan.steps, 1):
+            skill = registry.get(t.skill)
+            if t.setup:
+                t.setup(ctx)
+            res = skill.run(**t.kwargs(ctx))
+            if t.absorb:
+                t.absorb(ctx, res.output)
+            log.append({"step": i, "skill": t.skill, "ok": res.ok,
+                        "evidence": res.evidence})
+            if on_step:
+                on_step(i, t, res)
+            if not res.ok and t.skill != "procure":
+                # procure 의 확인 요청은 실패가 아니라 설계된 정지다
+                ok = False
+                break
+
+        metrics = {}
+        if "cook_min" in ctx:
+            rec_min = ctx["record"].get("cook_minutes_observed")
+            metrics["가열 시간(분)"] = ctx["cook_min"]
+            if rec_min is not None:
+                metrics["기록 고정시간 대비(분)"] = rec_min - ctx["cook_min"]
+            else:
+                # 공개 레시피에는 실측 조리 시간이 없다. 없는 값을 지어내지 않는다.
+                metrics["기록 고정시간 대비(분)"] = "해당 없음(첫 조리·실측 기록 없음)"
+            metrics["최종 질량비"] = ctx["final_ratio"]
+            if ctx["record"].get("estimated"):
+                metrics["목표 출처"] = "조리법 기본값(가정) — 이번 실측으로 대체 예정"
+        if "course" in ctx:
+            metrics["세척 코스"] = ctx["course"]
+            metrics["기대 물 사용(L)"] = ctx["water_expected_l"]
+            metrics["기본 코스 대비 절감(L)"] = ctx["water_saved_l"]
+        if ctx.get("order_krw"):
+            metrics["자동 주문(원)"] = ctx["order_krw"]
+        if ctx.get("need_confirm"):
+            metrics["확인 요청"] = [c["name"] + " — " + c["reason"]
+                                 for c in ctx["need_confirm"]]
+        metrics["메뉴"] = ctx.get("menu_name", "-")
+
+        return {"ok": ok, "user_touches": ctx["touches"],
+                "metrics": metrics, "log": log, "ctx": ctx}
+
+    return execute
