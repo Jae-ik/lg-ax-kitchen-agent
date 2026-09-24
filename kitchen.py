@@ -303,11 +303,22 @@ class Cooker:
         # 하면 증발이 즉시 멈춰, '미리 끄는' 판단이 필요 없는 세계였다.
         target_t = 40 + self.power * 13
         k = self.HEAT_K if target_t > self.temp_c else self._cool_k(self.mass_g)
-        self.temp_c += (min(target_t, 100) - self.temp_c) * k
+        # k 는 **1분당** 비율이다. 그대로 쓰면 tick(0.5) 도 tick(1.0) 과 같은
+        # 양만큼 온도를 바꾼다 — 관측을 자주 할수록 빨리 식는 세계가 된다.
+        # 관측 주기를 가변으로 만들면서 이 갱신식을 그대로 둔 것이 원인이었고,
+        # 그래서 여열 예측(1분 단위 계산)이 실제(0.45분 단위)와 2배 어긋났다.
+        # 지수 감쇠의 올바른 이산화로 고친다.
+        k_eff = 1 - (1 - k) ** minutes
+        t_before = self.temp_c
+        self.temp_c += (min(target_t, 100) - self.temp_c) * k_eff
+        # 증발량은 **스텝 동안의 평균 온도**로 구한다. 끝 온도만 쓰면 큰
+        # 스텝에서 과소평가된다(5분을 1분 단위로 가면 7.3g, 0.1분 단위로
+        # 가면 8.8g 으로 20% 어긋났다). 중점을 쓰면 스텝 크기에 덜 의존한다.
+        t_mid = (t_before + self.temp_c) / 2
         # 증발: 끓기 시작(약 90도) 이후 본격화.
         # 증발은 화력이 아니라 **온도**로 일어난다. 화력은 온도를 유지할 뿐이다.
         # 그래서 화력이 0 이어도 끓는 동안에는 계속 준다 — 이것이 여열이다.
-        boil = max(0.0, (self.temp_c - 88) / 12)
+        boil = max(0.0, (t_mid - 88) / 12)
         evap = (self.BASE_EVAP + self.power * self.POWER_EVAP) * boil * minutes
         evap *= random.uniform(0.92, 1.08)          # 회차 간 편차
         self.mass_g = max(0.0, self.mass_g - evap)
@@ -364,14 +375,34 @@ class Cooker:
         # 증발을 구한다. 순서를 뒤집으면 첫 항이 과대평가돼 3배 틀린다.
         t, total, m = self.temp_c, 0.0, self.mass_g
         for _ in range(horizon_min):
+            t0 = t
             t += (40 - t) * self._cool_k(m)
-            boil = max(0.0, (t - 88) / 12)
+            boil = max(0.0, ((t0 + t) / 2 - 88) / 12)   # tick 과 같은 중점법
             if boil <= 0:
                 break
             gone = self.BASE_EVAP * boil          # 화력 0 기준
             total += gone
             m = max(1.0, m - gone)                # 줄어든 양은 더 빨리 식는다
         return round(total, 2)
+
+    def rest_until_still(self, max_min: int = 20) -> dict:
+        """불을 끄고 **끓음이 멎을 때까지** 둔다. 그리고 그때 상태를 돌려준다.
+
+        사람이 먹는 것은 불을 끄는 순간의 음식이 아니라 여열이 끝난 음식이다.
+        그런데 지금까지 기록에 저장한 값은 **불을 끄는 순간**의 것이었다.
+        그 값을 다음 목표로 삼으면, 재현할 때 그 지점에서 또 여열이 붙어
+        매번 조금씩 더 졸아든다. 5회 반복하니 실제로 먹는 상태가
+        0.7654 에서 0.7599 로 흘러갔다.
+
+        "만족한 결과" 는 먹은 상태다. 그 시점에 재야 한다.
+        """
+        self.set_power(0)
+        for _ in range(max_min):
+            before = self.mass_g
+            self.tick(1.0)
+            if before - self.mass_g < 0.01:      # 더 이상 줄지 않는다
+                break
+        return self.state()
 
     def add_ingredient(self, name: str, grams: float, temp_c: float = 8.0):
         """조리 도중 재료를 넣는다.
@@ -535,8 +566,19 @@ def record_save(base: dict, measured: dict, saved_by: str = "본인",
         # 원본을 베끼지 않고 이번에 실제로 담은 양을 남긴다
         "initial_mass_g": (round(actual_initial_g) if actual_initial_g
                            else base.get("initial_mass_g")),
-        # 여기가 핵심 — 가정값이 아니라 이번에 잰 값이 다음 목표가 된다
-        "target_mass_ratio": measured.get("final_ratio", base.get("target_mass_ratio")),
+        # 목표는 **가정값일 때만** 실측으로 갈아 끼운다.
+        #
+        # 매번 이번 실측을 다음 목표로 삼으면 목표가 흘러간다. 제어에는 늘
+        # 작은 편향이 있고(여열 보정을 해도 평균 0.0034 더 졸았다), 그것이
+        # 회차마다 쌓이기 때문이다. 5회 반복하니 0.78 이 0.7509 까지 갔다.
+        #
+        # "엄마 된장찌개" 의 목표는 한 번 정해지면 매번 바뀌지 않는다.
+        # 목표를 바꾸는 것은 사용자가 "더 졸여줘" 라고 할 때지, 기계가
+        # 조금 빗나갔을 때가 아니다.
+        "target_mass_ratio": (measured.get("final_ratio")
+                              if base.get("estimated")
+                              else base.get("target_mass_ratio")),
+        "target_from": "이번 실측" if base.get("estimated") else "이전 목표 유지",
         "peak_temp_c": measured.get("peak_temp_c"),
         "cook_minutes_observed": measured.get("cook_min"),
         "soil_score": measured.get("soil_score", base.get("soil_score")),

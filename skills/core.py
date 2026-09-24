@@ -107,24 +107,15 @@ class ConvergeSkill(Skill):
             # 여열이 있으면 **목표가 아니라 '불을 끌 시점'** 을 향해 간다.
             # 이 구분이 없으면 주기 축소가 먼저 목표에 닿아 버려서, 여열을
             # 예측해 놓고도 한 번도 쓰지 못한다(620g 에서 실제로 그랬다).
-            # 여열 보정을 **쓸지 말지도 판단한다.**
+            # 여열은 **항상** 뺀다.
             #
-            # 관측을 자주 할 수 있으면 목표 바로 앞까지 잘게 다가가면 되고,
-            # 그때 여열을 미리 빼는 것은 오히려 예측 오차를 들여오는 일이다.
-            # 반대로 관측이 드물면 한 걸음이 커서 반드시 미리 꺼야 한다.
-            # 120시드로 재보니 주기 하한 0.1분에서는 여열을 쓰는 쪽이 나빴고
-            # (오차 0.0030 → 0.0052), 1분 고정에서는 쓰는 쪽이 3배 좋았다
-            # (0.0135 → 0.0049). 그 갈림은 '한 걸음의 크기 vs 여열 크기' 다.
-            res_now = 0.0
-            if residual is not None and coasting_at is None:
-                raw = residual(s) * res_trust
-                step_size = rate / dt * min_interval if dt > 0 else rate
-                if raw > 0 and step_size > raw:
-                    res_now = raw          # 한 걸음이 여열보다 크다 → 미리 꺼야 한다
-                elif raw > 0 and i == 1:
-                    evidence.append(
-                        f"  · 여열({raw:.4f})보다 한 걸음을 작게 둘 수 있다 "
-                        f"→ 여열 보정 없이 목표까지 다가간다")
+            # 한때 "관측을 자주 할 수 있으면 여열 보정이 해롭다" 고 재서
+            # 쓸지 말지를 자동으로 정하게 했다. 그 측정은 **목표가 '불 끄는
+            # 순간' 의 값이라는 전제** 위에 있었고, 그 전제가 틀렸다.
+            # 사람이 만족한 상태는 먹은 상태이고, 기록도 그 시점에 잰다.
+            # 목표가 '여열이 끝난 뒤' 의 값이면 여열은 선택이 아니라 필수다.
+            res_now = (residual(s) * res_trust
+                       if (residual is not None and coasting_at is None) else 0.0)
             aim = (target + res_now if direction == "down"
                    else target - res_now) if res_now else target
             gap = abs(cur - aim)

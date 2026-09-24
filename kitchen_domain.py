@@ -299,7 +299,10 @@ def build_tasks(constraints: dict) -> list:
                 "metric": "mass_ratio",
                 "target": ctx["record"]["target_mass_ratio"],
                 "direction": "down", "ready_key": "temp_c", "ready_at": 92.0,
-                "max_steps": 30,
+                # 양이 많으면 오래 걸린다. 4인분 960g 에서 관측 30회(=30분)
+                # 상한에 먼저 걸려 99.5% 에서 멈췄다. 상한은 '못 끝낼 때
+                # 멈추는 장치' 이지 정상 조리를 끊는 값이면 안 된다.
+                "max_steps": 60,
                 "min_controllable": min_ctrl, "amount_key": "initial_mass_g",
                 "on_observe": _make_stage_hook(ctx),
                 # 기기가 자기 여열을 안다. 제어기는 그 값을 받아 앞당겨 끈다.
@@ -325,9 +328,14 @@ def build_tasks(constraints: dict) -> list:
         ctx["coasted_from"] = out.get("coasted_from")
         ctx["guard_notes"] = out.get("guard_notes") or []
         ctx["relights"] = out.get("relights") or 0
-        K.COOKER.stop()
+        # 기록은 **먹기 직전** 상태로 남긴다. 불을 끄는 순간의 값을 저장하면
+        # 재현할 때 그 지점에서 또 여열이 붙어 회차마다 더 졸아든다.
+        rested = K.COOKER.rest_until_still()
+        ctx["off_ratio"] = out["final"]                 # 불 끄는 순간
+        ctx["final_ratio"] = rested["mass_ratio"]       # 먹기 직전 (저장 대상)
+        ctx["rest_drop"] = round(out["final"] - rested["mass_ratio"], 4)
+        st = rested
         ctx["cook_min"] = out["steps"]
-        ctx["final_ratio"] = out["final"]
 
         # 눌어붙음은 **이번 조리에서 잰 값**을 쓴다. 예전에는 기록에 적힌
         # 가정값을 그대로 세척기에 넘겼는데, 그러면 "조리기가 아는 것을
@@ -340,9 +348,10 @@ def build_tasks(constraints: dict) -> list:
         # 끝난 조리를 다음 번 목표로 저장한다.
         # 다만 목표를 지나친 결과를 그대로 저장하면 오차가 학습된다.
         # 저장 전에 검토하고, 벗어났으면 사용자에게 물어야 한다.
-        measured = {"final_ratio": out["final"], "cook_min": out["steps"],
+        measured = {"final_ratio": ctx["final_ratio"], "cook_min": out["steps"],
                     "peak_temp_c": st["peak_temp_c"],
                     "soil_score": st["soil_score"]}
+        K.COOKER.stop()
         review = K.record_review(ctx["record"], measured)
         ctx["save_review"] = review
 
@@ -488,6 +497,10 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                 # 공개 레시피에는 실측 조리 시간이 없다. 없는 값을 지어내지 않는다.
                 metrics["기록 고정시간 대비(분)"] = "해당 없음(첫 조리·실측 기록 없음)"
             metrics["최종 질량비"] = ctx["final_ratio"]
+            if ctx.get("rest_drop"):
+                metrics["여열로 더 졸음"] = (
+                    f"불 끌 때 {ctx['off_ratio']} → 먹기 직전 {ctx['final_ratio']} "
+                    f"({ctx['rest_drop']}) — 저장은 먹기 직전 값으로 한다")
         if "course" in ctx:
             metrics["세척 코스"] = ctx["course"]
             metrics["기대 물 사용(L)"] = ctx["water_expected_l"]

@@ -165,9 +165,9 @@
   "text": "converge 실행",
   "data": {
    "reached": true,
-   "observations": 10,
-   "steps": 8.1,
-   "final": 0.778,
+   "observations": 11,
+   "steps": 8.7,
+   "final": 0.7752,
    "target": 0.78,
    "too_small": false,
    "events": [],
@@ -175,7 +175,7 @@
    "guard_notes": [],
    "relights": 0,
    "overshot": false,
-   "overshoot": 0.002
+   "overshoot": 0.0048
   }
  },
  {
@@ -218,9 +218,9 @@
  },
  {
   "stage": "OUTPUT",
-  "text": "된장찌개(어머니 기록) 완료 — 8.1분에 목표 0.78 도달",
+  "text": "된장찌개(어머니 기록) 완료 — 8.7분에 목표 0.78 도달",
   "data": {
-   "고정시간_대비_가열_절감_분": 2.9000000000000004,
+   "고정시간_대비_가열_절감_분": 2.3000000000000007,
    "세척코스": "강력(불림 포함)",
    "기본코스_대비_기대물_절감_L": 1.4,
    "사용자_터치_횟수": 0
@@ -255,8 +255,8 @@
   "data": {
    "reached": true,
    "observations": 13,
-   "steps": 10.8,
-   "final": 0.0795,
+   "steps": 10.9,
+   "final": 0.079,
    "target": 0.08,
    "too_small": false,
    "events": [],
@@ -264,7 +264,7 @@
    "guard_notes": [],
    "relights": 0,
    "overshot": false,
-   "overshoot": 0.0005
+   "overshoot": 0.001
   }
  },
  {
@@ -307,7 +307,7 @@
  },
  {
   "stage": "OUTPUT",
-  "text": "건조 완료 — 10.8분에 함수율 0.0795 도달",
+  "text": "건조 완료 — 10.9분에 함수율 0.079 도달",
   "data": {
    "세탁조코스": "표준",
    "기본코스_대비_기대물_절감_L": 0.0
