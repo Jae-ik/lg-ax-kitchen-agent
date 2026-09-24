@@ -407,6 +407,19 @@ def build_tasks(constraints: dict) -> list:
                  "who": WHO.get(kind, "사람"), "note": note})
 
         def hook(state):
+            # (0) 졸임이 끝났는데 아직 안 익었으면 **다시 덮는다.**
+            #     덮으면 증발이 거의 없어 더 졸지 않으면서 익힐 수 있다 —
+            #     "뚜껑 덮고 뭉근히" 가 그것이다. 덮지 않으면 익히는 동안
+            #     계속 졸아 목표 0.95 짜리가 0.7777 까지 갔다.
+            if (lid_opened[0] and not state.get("lid")
+                    and state.get("doneness", 1.0) < 1.0
+                    and state["mass_ratio"] <= ctx["record"]["target_mass_ratio"]):
+                K.COOKER.set_lid(True)
+                hand("뚜껑", "아직 안 익었다 → 뚜껑을 덮고 뭉근히")
+                return {"note": ("졸임은 끝났는데 아직 안 익었다 → 뚜껑을 덮어 "
+                                 "더 졸지 않게 하고 익힌다"),
+                        "resets_baseline": False, "slow_down": True}
+
             # (1) 뚜껑 — 끓을 때까지 덮고, 끓으면 열어 **끝까지 열어 둔다.**
             #     온도 한 점을 기준으로 여닫으면 그 근처에서 계속 뒤집힌다.
             #     실제로 채터링이 나서 제어가 무너졌다(0.78 목표에 0.61).

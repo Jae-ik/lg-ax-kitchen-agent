@@ -48,7 +48,7 @@ class ConvergeSkill(Skill):
             tolerance: float | None = 0.10,
             min_interval: float = 0.1,
             on_observe=None, residual=None, guard=None, recover=None,
-            also_require=None, hold_power: int = 3,
+            also_require=None, hold_power: int = 1,
             **_) -> SkillResult:
 
         # 목표를 '넘어선 것' 과 '맞춘 것' 은 다르다.
@@ -75,9 +75,19 @@ class ConvergeSkill(Skill):
         too_small = bool(min_controllable and amount is not None
                          and amount < min_controllable)
         if too_small:
-            evidence.append(f"{amount_key}={amount} < 제어 가능 최소 "
-                            f"{min_controllable} — 한 주기 안에 목표를 지나칠 수 "
-                            f"있다. 관측 주기를 줄이거나 양을 늘려야 한다")
+            # 경고만 하고 진행했더니 5g 짜리가 목표 0.78 을 노리다 0.0523 까지
+            # 졸아 버렸다. 한 걸음보다 졸일 양이 적으면 **맞출 방법이 없다** —
+            # 시작하지 않는 것이 맞다.
+            why = (f"{amount_key}={amount} 은 목표 {target} 을 맞추기에 너무 적다 "
+                   f"(제어 가능 최소 {min_controllable}). 한 번 관측하는 사이에 "
+                   f"목표를 지나치므로 시작하지 않는다 — 양을 늘리거나 "
+                   f"목표를 낮춰야 한다")
+            evidence.append(why)
+            return SkillResult(False, {
+                "reached": False, "steps": 0.0, "observations": 0,
+                "final": round(start[metric], 4), "target": target,
+                "trace": trace, "events": [], "too_small": True,
+                "refused": True, "recovery": why}, evidence)
 
         if reached(start[metric]):
             evidence.append(f"시작 시점에 이미 {metric}={start[metric]:.4f} 로 "
@@ -181,8 +191,8 @@ class ConvergeSkill(Skill):
                     actuate(hold_power)
                     evidence.append(
                         f"  ● {metric} 는 목표에 닿았지만 아직 끝나지 않았다 "
-                        f"→ 화력 {hold_power} 로 유지하며 기다린다. "
-                        f"너무 낮추면 식어서 익지 않는다")
+                        f"→ 화력 {hold_power} 로 유지하며 기다린다 "
+                        f"(끓는 상태는 유지되고 증발만 줄인다)")
                 if recover is not None and (cur < target - 2e-3
                                             if direction == "down"
                                             else cur > target + 2e-3):
@@ -265,55 +275,30 @@ class ConvergeSkill(Skill):
             # 불을 꺼도 냄비에 남은 열로 조금 더 가기 때문이다. 그 '조금' 을
             # 기기가 예측해 주면, 제어기는 그만큼 앞당겨 끌 수 있다.
             # 이 한 줄이 없으면 아무리 자주 관측해도 늘 목표를 지나친다.
-            if coasting_at is None and residual is not None:
+            # 숙련자는 목표에 닿고 나서 끄지 않는다. **닿기 전에 끈다** —
+            # 불을 꺼도 냄비에 남은 열로 조금 더 가기 때문이다.
+            #
+            # 여기서 **끄고 바로 끝낸다.** 끈 뒤의 여열 구간까지 이 스킬이
+            # 붙들고 있으면, 호출자가 다시 여열을 돌릴 때 **두 번 적용**된다
+            # (실제로 그래서 여열을 쓰는 쪽 오차가 더 컸다 — 0.0084 vs 0.0115).
+            # 이 스킬의 일은 '언제 끌지' 까지다.
+            if residual is not None:
                 res = res_now
                 ahead = cur - res if direction == "down" else cur + res
                 if res > 0 and reached(ahead):
                     actuate(0)
-                    coasting_at = round(elapsed, 2)
                     evidence.append(
                         f"  ■ 여열 {res:.4f} 만큼 더 간다 → 지금 끈다 "
                         f"(현재 {cur:.4f}, 목표 {target}, 예상 도착 {ahead:.4f})")
-                    dt = min(dt, 0.5)
-                    continue
-            if coasting_at is not None:
-                # 여열 구간에서는 다시 불을 올리지 않는다. 다만 **여열이
-                # 끝났는데도 목표에 못 닿았으면 기다릴 이유가 없다** —
-                # 진행이 멈춘 채 관측 상한까지 헛돌면 시간만 버린다.
-                # 실제로 예측을 과대평가해 일찍 껐다가 17분을 헛돌았다.
-                if rate < 1e-4:
-                    short = abs(target - cur)
-                    # 덜 졸았으면 **다시 켜면 된다.** 요리는 그렇게 한다.
-                    # 지나친 것은 되돌릴 수 없지만 모자란 것은 되돌릴 수 있다.
-                    # 그래서 여열 예측은 과대한 편이 안전하고, 빗나간 만큼
-                    # 믿음을 줄여 다음 판단에 반영한다.
-                    # 기준은 '허용 오차 안인가' 가 아니라 **'목표에 닿았는가'** 다.
-                    # 느슨한 기준을 쓰면 덜 졸은 채로 끝내 버린다.
-                    if relights < self.MAX_RELIGHT and not reached(cur):
-                        relights += 1
-                        res_trust *= 0.5
-                        coasting_at = None
-                        dt = 1.0
-                        actuate(3)
-                        evidence.append(
-                            f"  ■ 여열이 끝났는데 목표까지 {short:.4f} 남았다 "
-                            f"— 다시 가열한다({relights}회째). 여열 예측을 "
-                            f"{res_trust:.2g} 배로 낮춰 잡는다")
-                        continue
-                    actuate(0)
-                    evidence.append(
-                        f"  ■ 여열이 끝났고 목표까지 {short:.4f} 남았다 — "
-                        f"다시 켠 횟수가 상한({self.MAX_RELIGHT})이라 여기서 멈춘다")
-                    return SkillResult(
-                        on_target(cur),
-                        {"reached": on_target(cur), "steps": round(elapsed, 2),
-                         "observations": i, "final": round(cur, 4),
-                         "target": target, "trace": trace, "events": events,
-                         "coasted_from": coasting_at, "guard_notes": guard_notes,
-                    "relights": relights, "held": holding[0], "coast_short": round(short, 4),
-                         "too_small": too_small, "overshot": False,
-                         "overshoot": round(short, 4)}, evidence)
-                continue
+                    return SkillResult(on_target(ahead), {
+                        "reached": on_target(ahead), "steps": round(elapsed, 2),
+                        "observations": i, "final": round(cur, 4),
+                        "predicted_final": round(ahead, 4),
+                        "target": target, "trace": trace, "events": events,
+                        "coasted_from": round(elapsed, 2),
+                        "guard_notes": guard_notes, "too_small": too_small,
+                        "overshot": False,
+                        "overshoot": round(abs(target - ahead), 4)}, evidence)
 
             # 준비 상태(예: 끓는점)에 못 미치면 세기를 올린다
             if ready_key and ready_at and s.get(ready_key, 0) < ready_at:

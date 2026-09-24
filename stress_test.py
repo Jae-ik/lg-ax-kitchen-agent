@@ -132,9 +132,13 @@ def t10():
         observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
         step=K.COOKER.tick, metric="mass_ratio",
         target=imp["target_mass_ratio"], direction="down",
-        ready_key="temp_c", ready_at=92.0, max_steps=30)
+        ready_key="temp_c", ready_at=92.0, max_steps=30,
+        # 파이프라인이 주는 값과 같게 — 한 걸음(약 2.1g)보다 졸일 양이
+        # 적으면 맞출 방법이 없다
+        min_controllable=round(2.1 / (1 - imp["target_mass_ratio"]), 1))
     K.COOKER.stop()
-    return f"초기 {total}g → {r.output['steps']}분 → {r.output['final']}"
+    return (f"초기 {total}g → 거부={r.output.get('refused')} "
+            f"{r.output['steps']}분 → {r.output['final']}")
 
 
 # ═══════════════ 4. 계획 수립의 극단 ═══════════════
@@ -330,10 +334,13 @@ def t27():
             observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
             step=K.COOKER.tick, metric="mass_ratio", target=0.78,
             direction="down", ready_key="temp_c", ready_at=92.0,
-            max_steps=40, **kw)
+            max_steps=400, max_minutes=45, **kw)
+        # **먹기 직전** 값으로 비교해야 한다. 불 끄는 시점으로 재면
+        # 여열을 안 쓴 쪽이 좋아 보인다 — 아직 여열이 안 붙었으니까.
+        eaten = K.COOKER.rest_until_still()["mass_ratio"]
         K.COOKER.stop()
-        out.append(f"{'여열O' if use else '여열X'} {r.output['final']} "
-                   f"(지나침 {abs(0.78 - r.output['final']):.4f})")
+        out.append(f"{'여열O' if use else '여열X'} {eaten} "
+                   f"(먹기 직전 기준 지나침 {abs(0.78 - eaten):.4f})")
     return " / ".join(out)
 
 
@@ -401,7 +408,7 @@ def t31():
             f"흡수용량 {o['absorb_cap_g']}g · 고형 {o['solid_g']}g")
 
 
-@case("뚜껑을 덮으면 빨리 끓고 졸지 않는가")
+@case("뚜껑을 덮으면 졸지 않는가")
 def t32():
     out = []
     for lid in (False, True):
@@ -411,6 +418,9 @@ def t32():
             K.COOKER.tick(1.0)
         s_ = K.COOKER.state()
         out.append(f"{'덮음' if lid else '엶'} 6분 → {s_['temp_c']}도 "
+                   f"비율 {s_['mass_ratio']} (덮으면 증기가 맺혀 돌아와 "
+                   f"거의 졸지 않는다)" if lid else
+                   f"{'덮음' if lid else '엶'} 6분 → {s_['temp_c']}도 "
                    f"비율 {s_['mass_ratio']}")
         K.COOKER.stop()
     return " / ".join(out)
@@ -456,11 +466,14 @@ def t35():
             K.COOKER.set_power(min(5, K.COOKER.power + 1))
     before = K.COOKER.state()
     need = (0.78 - before["mass_ratio"]) * before["initial_mass_g"]
-    e = K.COOKER.add_water(need) if need > 0 else None
+    # 파이프라인과 같은 상한(6%)을 지킨다 — 넘으면 되돌리지 않는다
+    ok_to = need > 0 and need / before["mass_g"] <= 0.06
+    e = K.COOKER.add_water(need) if ok_to else None
     after = K.COOKER.state()
     K.COOKER.stop()
-    return (f"{before['mass_ratio']} → 물 {round(need,1)}g → {after['mass_ratio']} "
-            f"(묽어짐 {e['dilution'] if e else 0:.1%})")
+    return (f"{before['mass_ratio']} → 필요 {round(need,1)}g → "
+            + (f"{after['mass_ratio']} (묽어짐 {e['dilution']:.1%})" if e
+               else f"되돌리지 않음 ({need/before['mass_g']:.1%} 묽어져 상한 6% 초과)"))
 
 
 @case("수명이 지난 재료를 쓰려 하는가")
@@ -479,11 +492,20 @@ def t37():
     # 거의 안 졸이는 목표 + 두꺼운 고기 → 익힘이 제약이 된다
     K.COOKER.start(900, 0, power=3, capacity_g=3000, solid_g=700,
                    need_units=1400)
+    def lid_hook(st):
+        # 파이프라인과 같은 동작: 졸임이 끝났는데 안 익었으면 뚜껑을 덮는다
+        if (not st.get("lid") and st.get("doneness", 1.0) < 1.0
+                and st["mass_ratio"] <= 0.95):
+            K.COOKER.set_lid(True)
+            return {"note": "뚜껑을 덮고 뭉근히", "resets_baseline": False,
+                    "slow_down": True}
+        return None
+
     r = REGISTRY.get("converge").run(
         observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
         step=K.COOKER.tick, metric="mass_ratio", target=0.95,
         direction="down", ready_key="temp_c", ready_at=92.0,
-        max_steps=400, max_minutes=60,
+        max_steps=400, max_minutes=60, on_observe=lid_hook,
         also_require=lambda st: st.get("doneness", 1.0) >= 1.0)
     s_ = K.COOKER.state()
     K.COOKER.stop()
@@ -508,7 +530,7 @@ def t39():
     return " / ".join(out)
 
 
-@case("출발 온도 차이가 유지되는가 (모델 한계 확인)")
+@case("출발 온도 차이가 유지되는가")
 def t38():
     out = []
     for t0 in (20.0, 6.0):
@@ -523,9 +545,8 @@ def t38():
         out.append(f"{t0}도 출발 {n * 0.25:.2f}분")
         K.COOKER.stop()
     return (" / ".join(out)
-            + "  ← 같으면 한계다. 1차 지연 모델은 출발 온도 차이를 "
-              "지수적으로 지운다. 실제 화구는 일정 열량을 넣어 선형에 가깝고 "
-              "차이가 더 오래 간다")
+            + "  ← 열량 수지 모델이라 차이가 남는다. 1차 지연이던 때는 "
+              "둘 다 3.75분으로 차이가 지워졌다")
 
 
 def main():

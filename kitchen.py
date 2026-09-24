@@ -286,6 +286,9 @@ class Cooker:
     LID_LOSS: float = 0.45            # 뚜껑을 덮으면 손실이 이 비율
     LID_EVAP: float = 0.15            # 뚜껑을 덮으면 증발한 물이 맺혀 돌아온다
     SURF_EVAP: float = 0.02           # 끓지 않을 때 표면 증발 g/(K·분)
+    # 불을 끄고 상에 올리기까지. 이 사이에도 물은 날아가므로 **기록에 남길
+    # 값은 이 시점의 것**이다. 3분은 가정이며, 실제로는 가구마다 다르다.
+    REST_MIN: int = 3
     BOIL_C: float = 100.0
     AMBIENT_C: float = 20.0
     peak_temp_c: float = 0.0
@@ -498,7 +501,7 @@ class Cooker:
                 "overflow_risk": self.overflow_risk(),
                 "power": self.power}
 
-    def predict_residual_g(self, horizon_min: int = 15) -> float:
+    def predict_residual_g(self, horizon_min: int | None = None) -> float:
         """지금 불을 끄면 **앞으로 더 날아갈 양**.
 
         숙련자는 목표에 닿고 나서 끄지 않는다. 닿기 전에 끈다 — 여열로
@@ -513,22 +516,27 @@ class Cooker:
         ghost.power = 0
         ghost.deterministic = True
         before = ghost.mass_g
-        for _ in range(horizon_min):
+        for _ in range(horizon_min or self.REST_MIN):
             prev = ghost.mass_g
             ghost.tick(1.0)
             if prev - ghost.mass_g < 0.01:
                 break
         return round(before - ghost.mass_g, 2)
 
-    def rest_until_still(self, max_min: int = 20) -> dict:
-        """불을 끄고 **끓음이 멎을 때까지** 둔다. 그리고 그때 상태를 돌려준다.
+    def rest_until_still(self, max_min: int | None = None) -> dict:
+        """불을 끄고 **상에 올리기까지** 둔다. 그리고 그때 상태를 돌려준다.
+
+        예전에는 "끓음이 멎을 때까지" 로 두었는데, 열 모델을 열량 수지로
+        바꾸자 끓음이 멎은 뒤에도 표면 증발이 계속돼 **끝나는 지점이
+        사라졌다**(15분 두면 11.3g). 여열은 물리 현상이지만 "얼마나 두는가"
+        는 사람의 행동이다. 불 끄고 상에 올리기까지의 시간으로 정의한다.
 
         사람이 먹는 것은 불을 끄는 순간의 음식이 아니라 여열이 끝난 음식이다.
         기록에 저장하는 값도 그 시점의 것이어야 한다 — 불 끄는 순간의 값을
         저장하면 재현할 때 그 지점에서 또 여열이 붙어 회차마다 더 졸아든다.
         """
         self.set_power(0)
-        for _ in range(max_min):
+        for _ in range(max_min or self.REST_MIN):
             before = self.mass_g
             self.tick(1.0)
             if before - self.mass_g < 0.01:
