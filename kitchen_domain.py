@@ -377,13 +377,16 @@ def build_tasks(constraints: dict) -> list:
                              f"{st.get('free_liquid_g', 0)}g) — 재료가 물을 "
                              f"다 빨아들였다. 더 졸일 물이 없으므로 여기서 "
                              f"멈춘다. 물을 더 붓고 다시 시작해야 한다")}
+        # 임계는 실제 분포에서 잡는다. 새 열 모델에서 재니 채움 50% 화력5 가
+        # 0.462, 75% 가 0.712, 90% 가 0.853 이다. 옛 임계(0.30/0.45)로는
+        # **절반만 찬 냄비도 화력이 묶였다** — 50% 는 넘치지 않는다.
         risk = st.get("overflow_risk", 0.0)
-        if risk >= 0.45:
+        if risk >= 0.78:
             return {"limit_power": 2,
                     "note": (f"끓어넘침 위험 {risk} (냄비의 "
                              f"{st.get('fill_ratio', 0):.0%} 가 찼고 {st['temp_c']}도) "
                              f"→ 화력을 2 로 묶는다")}
-        if risk >= 0.30:
+        if risk >= 0.60:
             return {"limit_power": 3,
                     "note": f"끓어넘침 위험 {risk} → 화력을 3 으로 묶는다"}
         return None
@@ -490,12 +493,22 @@ def build_tasks(constraints: dict) -> list:
         # 양(화력3 기준 약 2.1g)보다 졸일 양이 적을 때만 진짜 제어 불가다.
         # 적응 주기를 넣기 전 기준(분당 21g의 2배)을 그대로 두었더니
         # 실제로는 0.8462 로 잘 맞춘 실행에 경고가 붙었다 — 거짓 경보였다.
-        min_ctrl = round(2.1 / max(0.01, 1 - tgt), 1)
+        # 한 걸음(최소 주기 0.1분)에 날아가는 양보다 졸일 양이 적으면 맞출 수
+        # 없다. 그 양은 **화력에 비례**한다 — 화력3 에서 2.0g, 화력5 에서 3.8g.
+        # 예전에는 화력3 기준 2.1 로 고정해 두어, 화력이 올라가는 경우를
+        # 놓쳤다. 최대 화력 기준으로 잡는다.
+        step_g = round(
+            (5 * K.Cooker.WATT_PER_POWER - K.Cooker.LOSS_W_PER_K * 80)
+            * 0.1 * 60 / K.Cooker.LATENT_J_PER_G, 2)
+        min_ctrl = round(step_g / max(0.01, 1 - tgt), 1)
         return {"observe": lambda: K.COOKER.state(),
                 "actuate": K.COOKER.set_power, "step": K.COOKER.tick,
                 "metric": "mass_ratio",
                 "target": ctx["record"]["target_mass_ratio"],
-                "direction": "down", "ready_key": "temp_c", "ready_at": 92.0,
+                # 새 열 모델에서 '끓는다' 는 100도 도달이다. 94.6도에서는
+                # 분당 1g 인데 100도에서는 11.6g — 12배 차이다. 92 로 두면
+                # 아직 안 끓는 상태를 '준비됨' 으로 보고 화력을 안 올린다.
+                "direction": "down", "ready_key": "temp_c", "ready_at": 99.5,
                 # 상한은 관측 횟수가 아니라 **시간**으로 둔다. 주기를 줄이면
                 # 짧은 조리도 횟수 상한에 걸리기 때문이다. 사용자의 시간
                 # 예산 안에서 끝나야 하므로 그 값을 쓴다.
@@ -536,6 +549,26 @@ def build_tasks(constraints: dict) -> list:
         # 되돌리기는 **여열까지 끝난 뒤** 해야 한다. 불을 끈 시점에 맞춰
         # 물을 부어도 여열이 남아 있으면 다시 졸아든다.
         _tgt = ctx["record"]["target_mass_ratio"]
+
+        # **덜 졸았으면 다시 가열한다.** 여열 예측이 과대하면 일찍 꺼져
+        # 목표에 못 미친다. 물을 붓는 것은 지나쳤을 때 쓰는 수단이고,
+        # 모자랄 때는 더 졸이면 된다 — 실제 요리도 그렇게 한다.
+        _under = 0
+        while rested["mass_ratio"] > _tgt + 2e-3 and _under < 2:
+            _under += 1
+            K.COOKER.set_power(3)
+            for _ in range(240):
+                K.COOKER.tick(0.25)
+                _st = K.COOKER.state()
+                _res = (K.COOKER.predict_residual_g()
+                        / max(1.0, _st["initial_mass_g"]))
+                if _st["mass_ratio"] - _res <= _tgt:
+                    break
+            rested = K.COOKER.rest_until_still()
+        if _under:
+            ctx["reheated"] = (f"여열이 모자라 {_under}회 더 가열했다 "
+                               f"(최종 {rested['mass_ratio']})")
+
         if rested["mass_ratio"] < _tgt - 1e-3:
             _fix = _make_recover(ctx)(rested, _tgt, rested["mass_ratio"])
             if _fix:
@@ -696,6 +729,8 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["폐기 대상"] = ctx["expired_note"]
         if ctx.get("delivery_note"):
             metrics["조달 대기"] = ctx["delivery_note"]
+        if ctx.get("reheated"):
+            metrics["재가열"] = ctx["reheated"]
         if ctx.get("recovered"):
             metrics["되돌림"] = ctx["recovered"]
         if ctx.get("recover_declined"):

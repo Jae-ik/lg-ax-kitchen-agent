@@ -35,8 +35,10 @@ class ConvergeSkill(Skill):
         "amount_key": "str                 양을 담은 상태 키",
     }
     reusable_for = ["조리기(질량비)", "건조기(함수율)", "제습기(습도)", "에어컨(체감온도)"]
-    ETA_SAFETY = 1.4           # 진행이 가속할 수 있으므로 ETA 를 이만큼 보수적으로 본다
-    MAX_RELIGHT = 2            # 여열이 모자랄 때 다시 켜는 횟수 상한
+    # 진행이 가속할 수 있으므로 ETA 를 이만큼 보수적으로 본다.
+    # 열 모델을 열량 수지로 바꾼 뒤 끓는 중 연속 배율을 재니 최대 1.59 였다
+    # (끓기 전후는 12배까지 뛰지만 그 구간은 ready 분기가 잡는다).
+    ETA_SAFETY = 1.7
 
     def run(self, observe: Callable, actuate: Callable, step: Callable,
             metric: str, target: float, direction: str = "down",
@@ -103,10 +105,7 @@ class ConvergeSkill(Skill):
         dt = 1.0
         elapsed = 0.0
         events = []
-        coasting_at = None          # 여열로 마무리하려고 끈 시점
         holding = [False]           # 졸임은 끝났고 다른 조건을 기다리는 중
-        relights = 0                # 여열이 모자라 다시 켠 횟수
-        res_trust = 1.0             # 여열 예측을 얼마나 믿는가 (빗나가면 줄인다)
         cap = max_power             # 상황에 따라 낮아지는 실질 상한
         guard_notes = []
         for i in range(1, max_steps + 1):
@@ -131,8 +130,7 @@ class ConvergeSkill(Skill):
             # 순간' 의 값이라는 전제** 위에 있었고, 그 전제가 틀렸다.
             # 사람이 만족한 상태는 먹은 상태이고, 기록도 그 시점에 잰다.
             # 목표가 '여열이 끝난 뒤' 의 값이면 여열은 선택이 아니라 필수다.
-            res_now = (residual(s) * res_trust
-                       if (residual is not None and coasting_at is None) else 0.0)
+            res_now = residual(s) if residual is not None else 0.0
             aim = (target + res_now if direction == "down"
                    else target - res_now) if res_now else target
             gap = abs(cur - aim)
@@ -236,8 +234,8 @@ class ConvergeSkill(Skill):
                     "final": round(cur, 4),
                     "target": target, "trace": trace,
                     "too_small": too_small, "events": events,
-                    "coasted_from": coasting_at, "guard_notes": guard_notes,
-                    "relights": relights, "held": holding[0],
+                    "coasted_from": None, "guard_notes": guard_notes,
+                    "held": holding[0],
                     "overshot": not ok, "overshoot": over}, evidence)
 
             # 이상 감지. 기기 사양 상한(max_power)과 **지금 이 상황에서
@@ -358,8 +356,8 @@ class ConvergeSkill(Skill):
                                    "target": target, "trace": trace,
                                    "progress_pct": round(progress, 1),
                                    "events": events,
-                                   "coasted_from": coasting_at,
-                                   "guard_notes": guard_notes, "held": holding[0], "guard_notes": guard_notes,
+                                   "coasted_from": None,
+                                   "guard_notes": guard_notes, "held": holding[0],
                                    "remaining_min": eta,
                                    "stopped": True, "recovery": why},
                            evidence)

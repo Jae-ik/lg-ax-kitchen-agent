@@ -23,7 +23,10 @@ from planner import Task, plan as make_plan
 from skills import REGISTRY
 from orchestrator import Trace, banner, W
 
-# 단계별 예상 소요 — 상황 판단(시간이 모자라는가)의 기준이 된다
+# 단계별 예상 소요 — 상황 판단(시간이 모자라는가)의 기준이 된다.
+# **설계 시점의 추정값**이다. 조리 시간은 양과 메뉴에 따라 5.5~25분으로
+# 갈리는데, 그 둘은 아직 정해지지 않았다. 실제 소요는 실행 뒤에 재서
+# 시간 예산과 대조한다(experience_verify).
 # '조달' 은 더 이상 내가 정한 값이 아니다. 상점 어댑터가 알려주는
 # **가장 빠른 배송 시간**을 쓴다. 상점이 바뀌면 이 판단도 함께 바뀐다.
 import store as _store

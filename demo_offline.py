@@ -90,7 +90,7 @@ def main():
             break
         st = K.COOKER.state()
         if K.COOKER.power < 5:
-            if st["temp_c"] < 92 and p["progress_pct"] <= 0.1:
+            if st["temp_c"] < 99.5 and p["progress_pct"] <= 0.1:
                 K.COOKER.set_power(K.COOKER.power + 1)
                 print(f"    ↑ 아직 끓지 않아 화력을 {K.COOKER.power} 로 올림")
             elif p["eta_min"] and p["eta_min"] > 6:

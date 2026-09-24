@@ -6,6 +6,7 @@ LLM 과 무관한 순수 로직이다. 에이전트는 이 모듈의 함수만 �
 """
 from __future__ import annotations
 import copy
+import math
 import random
 from dataclasses import dataclass, field
 
@@ -260,9 +261,28 @@ class Cooker:
     cook_units: float = 0.0           # 익힘 누적 (온도 x 시간)
     need_units: float = 0.0           # 다 익으려면 필요한 양
 
-    # 열 모델 상수. 모두 **시뮬레이터 가정**이며 실측이 아니다.
-    # 실제 기기에서는 냄비별로 재서 채워 넣어야 하는 자리다.
+    # ══════════════════════════════════════════════════════════════════
+    # 상수 표 — **무엇에서 나왔는가**를 적어 둔다.
+    #
+    # 열 모델을 한 번 갈아엎고 나서, 그 위에서 정한 상수·임계·시험 기대값이
+    # 전부 낡았는데 "예외 0건·회귀 통과" 로는 하나도 안 잡혔다. 값을 처음부터
+    # 다시 읽어서야 찾았다. 그래서 상수마다 근거를 남긴다 — 근거를 못 적는
+    # 숫자는 다음 사람이 고칠 수 없다.
+    #
+    #   측정에서 역산   C_WATER · LATENT · POT_EQ_G · WATT_PER_POWER · LOSS_W_PER_K
+    #   실제 조리 관찰  REST_MIN · ABSORB_BASE_C · LID_LOSS · LID_EVAP
+    #   시뮬레이터 가정 SURF_EVAP · ABSORB_RATE · STIR_RELIEF · soil 계수
+    #
+    # 모델을 바꾸면 **아래 전부를 다시 재야 한다.** 함께 낡는 것:
+    #   kitchen_domain: min_ctrl(한 걸음 크기) · ready_at(끓음 판정) ·
+    #                   넘침 임계 · 교반 임계
+    #   skills/core:    ETA_SAFETY(가속 폭) · hold_power(유지 중 증발)
+    #   skills/core:    AftercareSkill.CUTS(눌어붙음 분포)
+    # ══════════════════════════════════════════════════════════════════
     ABSORB_RATE: float = 0.35         # 분당 흡수 속도 (남은 용량의 비율)
+    # 불리기는 끓어야 시작하는 일이 아니다. 미지근해도 쌀은 물을 먹는다.
+    # 익힘 기준(60도)을 그대로 쓰다가 2kg 짜리에서 **6분까지 흡수가 0** 이었다.
+    ABSORB_BASE_C: float = 40.0
     STIR_RELIEF: float = 0.55         # 저으면 그 뒤 눌어붙음이 이 비율로 준다
     COOK_BASE_C: float = 60.0         # 이 온도 위에서만 익는다
 
@@ -428,7 +448,7 @@ class Cooker:
 
         # 재료가 국물을 빨아들인다. 총 질량은 그대로지만 졸일 수 있는 물이 준다.
         room = max(0.0, self.absorb_cap_g - self.absorbed_g)
-        if room > 0 and self.temp_c > 60:
+        if room > 0 and self.temp_c > self.ABSORB_BASE_C:
             take = min(room * self.ABSORB_RATE * minutes, self.free_liquid_g())
             self.absorbed_g += take
 
@@ -458,9 +478,12 @@ class Cooker:
         self.stir_since_min += minutes
         # 저은 지 오래될수록 바닥에 가라앉은 것이 눌어붙는다
         stir_factor = self.STIR_RELIEF if self.stir_since_min < 3 else 1.0
-        self.soil = min(1.0, self.soil +
-                        boil * (0.30 + dryness) * (self.power / 5) * minutes
-                        * 0.30 * stir_factor)
+        # 누적은 자르지 않고 쌓고, 점수로 바꿀 때만 0~1 로 누른다.
+        # min(1.0, ...) 으로 자르면 긴 조리에서 **상한에 붙어 정보를 잃는다**
+        # (24분짜리 삼계탕이 1.0 으로 포화해 흔들림도 0 이 됐다).
+        # 1 - exp(-누적) 은 1 에 점근하되 닿지 않아 구분이 남는다.
+        self.soil += (boil * (0.30 + dryness) * (self.power / 5) * minutes
+                      * 0.30 * stir_factor)
         self.peak_temp_c = max(self.peak_temp_c, self.temp_c)
 
         # 익힘. 제안서는 "익힘·졸임의 판단이 어려운" 사용자를 대상으로 적었는데
@@ -480,11 +503,13 @@ class Cooker:
                 if self.initial_mass_g else 0.0,
                 "temp_c": round(self.temp_c, 1),
                 "peak_temp_c": round(self.peak_temp_c, 1),
-                "soil_score": round(self.soil, 4),
+                "soil_score": round(1.0 - math.exp(-self.soil), 4),
                 # 증발 편차(±8%)가 누적되므로 눌어붙음도 회차마다 흔들린다.
                 # 상대 표준편차 2.5% 는 파이프라인 120회에서 잰 값이다
                 # (평균 0.5286, 표준편차 0.0133).
-                "soil_sigma": round(self.soil * 0.025, 4),
+                # 점수의 흔들림. 누적의 상대 오차가 점수로 전달될 때
+                # 기울기 exp(-누적) 이 곱해진다.
+                "soil_sigma": round(self.soil * 0.025 * math.exp(-self.soil), 4),
                 "added_g": round(self.added_g, 1),
                 "free_liquid_g": round(self.free_liquid_g(), 1),
                 "free_ratio": round(self.free_liquid_g() / self.mass_g, 3)
