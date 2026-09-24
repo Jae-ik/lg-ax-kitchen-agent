@@ -17,7 +17,8 @@ import sys
 
 import kitchen as K
 import personas
-from kitchen_domain import build_tasks, make_executor, pantry_stock
+from kitchen_domain import (build_tasks, make_executor, pantry_stock,
+                            pantry_refill)
 from planner import Task, plan as make_plan
 from skills import REGISTRY
 from orchestrator import Trace, banner, W
@@ -75,14 +76,17 @@ def design_for(pid: str, trace: Trace, seed: int = 7) -> dict:
     # 가구가 바뀌면 재고도 바뀐다. 앞 실행의 상태가 남지 않게 초기화한다.
     # 상비품(소금·후춧가루 등)은 가구와 무관하게 늘 있다고 본다.
     # seed 를 바꿔 같은 상황을 여러 번 돌리면 흔들림의 크기를 잴 수 있다.
-    K.reset((p.get("fridge") or []) + pantry_stock(), seed=seed)
+    low = p.get("pantry_low")
+    K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed)
 
     trace.stage("GOAL", f"{p['label']}의 수고를 줄이는 UX 시나리오를 만들고 "
                         f"실행으로 검증한다",
                 {"입력": "고객 상황", "사용자 지시": None,
                  "보고된 불편": len(p["friction_reported"])})
 
-    ctx = {"persona": p, "executor": make_executor(REGISTRY)}
+    refill = pantry_refill(low)
+    ctx = {"persona": p,
+           "executor": make_executor(REGISTRY, seed_ctx={"pantry_refill": refill})}
     tasks = build_design_tasks(ctx)
     dp = make_plan({"verified"}, tasks)
 

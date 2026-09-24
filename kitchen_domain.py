@@ -49,10 +49,26 @@ PANTRY = {"소금", "후춧가루", "설탕", "식용유", "참기름", "물", "
           "녹말가루", "식초", "고춧가루", "마늘", "생강"}
 
 
-def pantry_stock() -> list:
-    """상비품을 재고 항목으로 만든다. 가구를 바꿔도 이것은 늘 있다고 본다."""
-    return [{"name": n, "qty_g": 500, "stored_days": 30,
-             "shelf_life_days": 720} for n in sorted(PANTRY)]
+PANTRY_MIN_G = 10        # 이보다 적게 남았으면 '없는 것' 으로 본다
+
+
+def pantry_stock(low: dict | None = None) -> list:
+    """상비품을 재고 항목으로 만든다.
+
+    예전에는 상비품이 무한히 있다고 가정했다. 그런데 참기름도 떨어진다 —
+    조리 중에 알면 늦는다. 잔량이 기준 미만이면 재고에서 빼서
+    '부족분' 으로 흘러가게 한다.
+    """
+    low = low or {}
+    return [{"name": n, "qty_g": low.get(n, 500), "stored_days": 30,
+             "shelf_life_days": 720}
+            for n in sorted(PANTRY) if low.get(n, 500) >= PANTRY_MIN_G]
+
+
+def pantry_refill(low: dict | None = None) -> list:
+    """잔량이 바닥난 상비품 목록. 레시피와 무관하게 같이 주문한다."""
+    low = low or {}
+    return [n for n in sorted(PANTRY) if low.get(n, 500) < PANTRY_MIN_G]
 
 
 def resolve_stock(ing_name: str, have: dict):
@@ -97,8 +113,11 @@ def recipe_to_record(r: dict) -> dict:
 # 조달 스킬은 가격표가 아니라 '조회 함수' 를 받는다 — 상점이 몇 곳인지,
 # 시뮬레이터인지 실제 API 인지 알지 못한다.
 CATALOG = store.BASE_PRICE          # 재고 반영·수량 산정에만 쓴다
+# 이전에 산 적 있는 품목. 양념·상비품은 반복 구매하므로 이력이 쌓여 있다.
+# 찹쌀·미나리처럼 처음 사는 것은 여기 없어서 사용자 확인을 거친다.
 KNOWN_ITEMS = ["두부", "대파", "간장", "된장", "닭고기", "양파", "당근",
-               "감자", "달걀", "배추", "애호박"]        # 이전에 산 적 있는 품목
+               "감자", "달걀", "배추", "애호박",
+               "참기름", "식용유", "설탕", "소금", "고춧가루", "식초", "밀가루"]
 AUTO_LIMIT_KRW = 15000                                # 1회 자동 주문 상한
 
 
@@ -156,7 +175,12 @@ def build_tasks(constraints: dict) -> list:
         ctx["menu_from"] = "공개 레시피" if rid.startswith("pub_") else "저장된 기록"
 
     def _procure_bind(ctx):
-        return {"missing": ctx.get("missing", []),
+        # 레시피에 필요한 부족분 + 바닥난 상비품 보충
+        need = list(ctx.get("missing", []))
+        for n in ctx.get("pantry_refill", []):
+            if n not in need:
+                need.append(n)
+        return {"missing": need,
                 "lookup": store.make_lookup(),
                 "known_items": KNOWN_ITEMS, "avoid": avoid,
                 "auto_limit_krw": AUTO_LIMIT_KRW,
@@ -248,14 +272,17 @@ def build_tasks(constraints: dict) -> list:
     ]
 
 
-def make_executor(registry, on_step=None):
+def make_executor(registry, on_step=None, seed_ctx=None):
     """계획을 실제로 실행하는 함수를 만든다.
 
     experience_verify 스킬에 주입된다. 설계 스킬이 실행 층을 import 하지 않게
     하려는 것이다 — 스킬끼리는 여전히 서로를 모른다.
     """
     def execute(plan):
-        ctx, log, ok = {"touches": 0}, [], True
+        ctx = {"touches": 0}
+        if seed_ctx:
+            ctx.update(seed_ctx)
+        log, ok = [], True
         for i, t in enumerate(plan.steps, 1):
             skill = registry.get(t.skill)
             if t.setup:

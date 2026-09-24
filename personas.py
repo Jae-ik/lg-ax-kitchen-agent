@@ -76,6 +76,34 @@ PERSONAS = {
             {"name": "배추", "qty_g": 300, "stored_days": 1, "shelf_life_days": 7},
         ],
     },
+
+
+    "p4_퇴근길": {
+        "id": "p4_퇴근길",
+        "label": "퇴근길 1인 가구",
+        "household_size": 1,
+        # 퇴근 시각과 이동 시간이 있으면 에이전트가 '집에 없는 동안' 을 쓸 수 있다.
+        # 앞의 세 상황에는 이 두 값이 없어 귀가 후에야 판단을 시작한다.
+        "leave_office": "18:40",
+        "commute_min": 40,
+        "arrive_home": "19:20",
+        "time_budget_min": 25,          # 귀가 후 식사까지
+        "next_morning_rush": True,
+        "avoid": [],
+        "dislike_noise_after": "23:00",
+        "goal_hint": "퇴근길에 이미 재료가 오고 있으면 좋겠다",
+        "friction_reported": [
+            "퇴근길에 장을 보러 들르는 일",
+            "집에 와서 뭐가 없는지 그제야 아는 일",
+            "양념이 떨어진 걸 조리 중에 발견하는 일",
+        ],
+        "fridge": [
+            {"name": "배추", "qty_g": 320, "stored_days": 5, "shelf_life_days": 7},
+            {"name": "된장", "qty_g": 500, "stored_days": 40, "shelf_life_days": 365},
+        ],
+        # 상비품도 떨어진다. 참기름이 바닥났다 — 조리 중에 알면 늦는다.
+        "pantry_low": {"참기름": 5},
+    },
 }
 
 

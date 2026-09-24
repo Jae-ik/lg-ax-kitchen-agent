@@ -50,11 +50,14 @@ kitchen.py / dryer.py  기기 시뮬레이터 (ThinQ Connect API 로 교체 가�
 | 야근 1인 가구 | inventory → recipe_source → menu → prep → converge → aftercare | 된장찌개 (저장 기록) | 0회 | 4/4 |
 | 맞벌이 2인 가구 | … → **procure** → prep → converge → aftercare | 된장찌개 (저장 기록) | 0회 | 4/4 |
 | 알레르기 4인 가구 | … → **procure** → prep → converge → aftercare | 호박잎 삼계탕 (**공개 레시피**) | 2회 | 5/5 |
+| 퇴근길 1인 가구 | … → **procure**(선제) → prep → converge → aftercare | 된장찌개 (저장 기록) | 0회 | 4/4 |
 
 1인 가구는 귀가 후 25분뿐이라 조달(20분 예상)이 예산을 넘는다.
 Agent가 `stock_complete`를 이미 성립한 사실로 두자 플래너가 **`procure`를 스스로 제외**했다.
 알레르기 가구는 저장 기록에 쓸 것이 없어 **공개 레시피 48건 중에서** 임박한 닭고기를 쓰는 것을 골랐고,
 처음 사는 품목 2건은 자동 주문하지 않고 물었다(개입 2회 = 설계된 정지).
+퇴근길 가구는 **퇴근 시각을 알기 때문에** 이동 40분 안에 배송이 끝난다 —
+냉장고와 양념 선반을 함께 확인해 두부·참기름을 귀가 시각에 맞춰 주문하고, 개입은 0회다.
 
 ## 데이터 — 합성이 아닌 공개 자료
 

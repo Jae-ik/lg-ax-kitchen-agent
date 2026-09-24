@@ -33,16 +33,29 @@ class SituationReadSkill(Skill):
     def run(self, persona: dict, stage_costs: dict, **_) -> SkillResult:
         need_min = sum(stage_costs.values())
         budget = persona.get("time_budget_min", 999)
+        commute = persona.get("commute_min", 0)
+        buy_min = stage_costs.get("조달", 0)
         ev = [f"보고된 불편 {len(persona.get('friction_reported', []))}건",
-              f"필요 시간 {need_min}분 / 사용 가능 {budget}분"]
+              f"필요 시간 {need_min}분 / 귀가 후 사용 가능 {budget}분"]
 
         constraints, friction = {}, []
 
-        # 시간이 모자라면 조달처럼 기다림이 있는 단계를 뺀다
-        if budget < need_min:
+        # 퇴근 시각과 이동 시간을 알면 '집에 없는 동안' 을 쓸 수 있다.
+        # 배송이 이동 시간 안에 끝나면 귀가 시점에 재료가 도착해 있다.
+        if commute and commute >= buy_min:
+            constraints["preorder"] = True
+            need_at_home = need_min - buy_min
+            ev.append(f"퇴근~귀가 {commute}분 ≥ 배송 {buy_min}분 → "
+                      f"집에 없는 동안 조달을 끝낸다 (선제 주문)")
+        else:
+            constraints["preorder"] = False
+            need_at_home = need_min
+
+        # 귀가 후 시간으로 감당되지 않으면 조달을 뺀다
+        if budget < need_at_home:
             constraints["skip_procurement"] = True
-            over = need_min - budget
-            ev.append(f"{over}분 초과 → 대기가 생기는 조달 단계를 빼고 재고 안에서 해결")
+            ev.append(f"{need_at_home - budget}분 초과 → 대기가 생기는 조달 단계를 "
+                      f"빼고 재고 안에서 해결")
         else:
             constraints["skip_procurement"] = False
 
@@ -64,7 +77,8 @@ class SituationReadSkill(Skill):
         if na:
             ev.append(f"저염 권고 {na}mg → 후보 자료를 영양 기준으로 거른다")
 
-        constraints["budget_min"] = budget
+        constraints["budget_min"] = commute if constraints.get("preorder") else budget
+        constraints["commute_min"] = commute
 
         quiet = persona.get("dislike_noise_after")
         if quiet:
@@ -126,13 +140,24 @@ class ScenarioDraftSkill(Skill):
                 "removes": "재료마다 못 먹는 것이 섞였는지 확인하는 일",
                 "verified_by": "menu"})
 
+        if constraints.get("preorder"):
+            lv = persona.get("leave_office", t0)
+            beats.append({
+                "at": lv, "user": "사무실을 나선다",
+                "system": "냉장고와 양념 선반을 함께 확인해 부족한 것을 "
+                          "귀가 시각에 맞춰 주문한다",
+                "removes": "퇴근길에 장을 보러 들르는 일 / 집에 와서 뭐가 없는지 "
+                           "그제야 아는 일 / 양념이 떨어진 걸 조리 중에 발견하는 일",
+                "verified_by": "procure"})
+
         if constraints.get("skip_procurement"):
             beats.append({
                 "at": self._plus(t0, 2), "user": "장을 보지 않는다",
                 "system": "시간이 모자라므로 지금 있는 재료만으로 가능한 것을 고른다",
                 "removes": "시간이 모자란 상태에서 메뉴를 정하는 일",
                 "verified_by": "menu"})
-        else:
+        elif not constraints.get("preorder"):
+            # 선제 주문이면 퇴근길 장면이 이미 조달을 덮는다 — 중복해서 넣지 않는다
             beats.append({
                 "at": self._plus(t0, 2), "user": "주문을 누르지 않는다",
                 "system": "부족분 중 이력이 있고 상한 이내인 것만 스스로 주문한다",
@@ -153,6 +178,9 @@ class ScenarioDraftSkill(Skill):
                           + (f" {quiet} 전에 시작한다" if quiet else " 바로 시작한다"),
                 "removes": "먹고 나서 설거지를 미루는 일 / 세척기를 언제 돌릴지 정하는 일",
                 "verified_by": "aftercare"})
+
+        # 장면은 시각 순으로 읽혀야 한다 — 퇴근이 귀가보다 앞이다
+        beats.sort(key=lambda b: b["at"])
 
         removed = {b["removes"] for b in beats}
         for f in friction:
