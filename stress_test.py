@@ -368,6 +368,101 @@ def t29():
             f"{len(r.output['events'])}회 · 비율이 1 을 넘은 관측 {len(over_one)}건")
 
 
+@case("물을 먹는 재료 — 국물이 바닥나는가")
+def t30():
+    K.reset()
+    K.COOKER.start(960, 0, power=3, capacity_g=3000,
+                   solid_g=600, absorb_cap_g=320)
+    for _ in range(10):
+        K.COOKER.tick(1.0)
+        if K.COOKER.state()["temp_c"] < 92:
+            K.COOKER.set_power(min(5, K.COOKER.power + 1))
+    s_ = K.COOKER.state()
+    K.COOKER.stop()
+    return (f"질량비 {s_['mass_ratio']} (목표 0.85 에 못 감) · 자유수분 "
+            f"{s_['free_liquid_g']}g · 눌어붙음 {s_['soil_score']}")
+
+
+@case("흡수량 + 졸일 양을 계산해 물을 붓는가")
+def t31():
+    from kitchen_domain import absorb_capacity, solid_mass
+    rec = {"menu": "삼계탕", "target_mass_ratio": 0.85, "initial_mass_g": 960,
+           "ingredients": [{"name": "닭고기", "qty_g": 480},
+                           {"name": "찹쌀", "qty_g": 400},
+                           {"name": "미나리", "qty_g": 80}]}
+    K.reset()
+    for i in rec["ingredients"]:
+        K.fridge_add(i["name"], i["qty_g"] + 100)
+    r = REGISTRY.get("prep").run(record=rec, weigh=K.prep_weigh,
+                                 available=lambda n: K.fridge_check(n) is not None,
+                                 absorb_of=absorb_capacity, solid_of=solid_mass)
+    o = r.output
+    return (f"총 {o['total_mass_g']}g (물 {o['water_added_g']}g 추가) · "
+            f"흡수용량 {o['absorb_cap_g']}g · 고형 {o['solid_g']}g")
+
+
+@case("뚜껑을 덮으면 빨리 끓고 졸지 않는가")
+def t32():
+    out = []
+    for lid in (False, True):
+        K.reset(seed=3)
+        K.COOKER.start(620, 0, power=3, capacity_g=1100, lid=lid)
+        for _ in range(6):
+            K.COOKER.tick(1.0)
+        s_ = K.COOKER.state()
+        out.append(f"{'덮음' if lid else '엶'} 6분 → {s_['temp_c']}도 "
+                   f"비율 {s_['mass_ratio']}")
+        K.COOKER.stop()
+    return " / ".join(out)
+
+
+@case("거품을 걷으면 졸은 것으로 세는가")
+def t33():
+    K.reset()
+    K.COOKER.start(1000, 0, power=3, capacity_g=3000, solid_g=400)
+    before = K.COOKER.state()
+    e = K.COOKER.skim(45, "거품")
+    after = K.COOKER.state()
+    K.COOKER.stop()
+    return (f"걷기 전 비율 {before['mass_ratio']} → 걷은 뒤 {after['mass_ratio']} "
+            f"(분모도 {before['initial_mass_g']}→{after['initial_mass_g']}g 로 줄어 "
+            f"졸은 것으로 세지 않는다)")
+
+
+@case("저으면 눌어붙음이 줄어드는가")
+def t34():
+    out = []
+    for stir in (False, True):
+        K.reset(seed=5)
+        K.COOKER.start(700, 0, power=3, capacity_g=1100, solid_g=300)
+        for i in range(9):
+            K.COOKER.tick(1.0)
+            if K.COOKER.state()["temp_c"] < 92:
+                K.COOKER.set_power(min(4, K.COOKER.power + 1))
+            if stir and i % 2 == 1:
+                K.COOKER.stir()
+        out.append(f"{'저음' if stir else '안 저음'} {K.COOKER.state()['soil_score']}")
+        K.COOKER.stop()
+    return " / ".join(out)
+
+
+@case("너무 졸았을 때 물로 되돌리는가")
+def t35():
+    K.reset()
+    K.COOKER.start(620, 0, power=3, capacity_g=1100)
+    for _ in range(9):
+        K.COOKER.tick(1.0)
+        if K.COOKER.state()["temp_c"] < 92:
+            K.COOKER.set_power(min(5, K.COOKER.power + 1))
+    before = K.COOKER.state()
+    need = (0.78 - before["mass_ratio"]) * before["initial_mass_g"]
+    e = K.COOKER.add_water(need) if need > 0 else None
+    after = K.COOKER.state()
+    K.COOKER.stop()
+    return (f"{before['mass_ratio']} → 물 {round(need,1)}g → {after['mass_ratio']} "
+            f"(묽어짐 {e['dilution'] if e else 0:.1%})")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("t") and callable(v) and hasattr(v, "_name")]

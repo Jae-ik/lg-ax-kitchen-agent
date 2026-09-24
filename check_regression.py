@@ -9,7 +9,9 @@
 """
 from __future__ import annotations
 import json
+import os
 import sys
+import time
 
 EXPECT = {
     "p1_야근":    {"steps": 6, "touches": 0, "beats": "4/4", "cooked": True},
@@ -21,8 +23,16 @@ SKIP_OK = {"procure"}          # 확인 요청은 실패가 아니라 설계된 
 
 
 def main():
+    # **생성 시각을 먼저 본다.** 생성 명령이 예외로 죽으면 파일은 앞 실행
+    # 내용 그대로 남고, 그것을 새 결과로 읽으면 통과라고 보고하게 된다.
+    # 실제로 그렇게 한 번 속았다.
+    age = time.time() - os.path.getmtime("scenarios.json")
     rows = json.load(open("scenarios.json", encoding="utf-8"))
     bad = 0
+    if age > 300:
+        print(f"  !! scenarios.json 이 {age / 60:.0f}분 전 파일이다 — "
+              f"방금 실행한 결과가 아니다")
+        bad += 1
     # 실행이 중간에 죽으면 파일은 **앞 실행 내용 그대로** 남는다.
     # 개수부터 보지 않으면 옛 결과를 새 결과로 착각한다.
     if len(rows) != len(EXPECT):

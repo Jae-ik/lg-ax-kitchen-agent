@@ -30,6 +30,38 @@ METHOD_DEFAULT = {          # 조리법: (목표 질량비, 예상 오염도)
 
 # 같은 재료를 부르는 다른 이름들. 냉장고 품목명 → 자료에서 쓰이는 표기.
 # 공개 자료를 쓰면 반드시 생기는 문제라 도메인 지식으로 따로 둔다.
+# 1g 이 빨아들이는 물의 양. 레시피에는 "물 적당히" 라고만 적혀 있고
+# 얼마나 필요한지는 적혀 있지 않다 — 에이전트가 계산해서 채운다.
+# 값은 일반적인 조리 자료 범위의 가정이며 실측이 아니다.
+ABSORBS = {"찹쌀": 2.0, "쌀": 2.2, "국수": 1.6, "당면": 2.5, "미역": 7.0,
+           "콩": 1.8, "표고버섯": 0.8, "떡": 0.3}
+# 삶으면 거품(단백질·기름)이 뜬다. 1g 당 걷어낼 양.
+SCUM = {"닭고기": 0.045, "돼지고기": 0.06, "소고기": 0.055}
+
+
+def scum_amount(ingredients) -> float:
+    return sum(SCUM.get(i["name"], 0.0) * i.get("qty_g", 0) for i in ingredients)
+
+
+# 고형분으로 남는 비율 (나머지는 국물에 섞인다)
+SOLID_RATIO = {"닭고기": 0.85, "돼지고기": 0.85, "소고기": 0.85, "두부": 0.75,
+               "배추": 0.35, "애호박": 0.30, "무": 0.30, "감자": 0.70,
+               "찹쌀": 1.0, "쌀": 1.0, "국수": 1.0, "당면": 1.0,
+               "미역": 1.0, "콩": 1.0, "표고버섯": 0.6, "떡": 1.0}
+
+
+def absorb_capacity(ingredients) -> float:
+    """이 재료들이 빨아들일 물의 총량."""
+    return sum(ABSORBS.get(i["name"], 0.0) * i.get("qty_g", 0)
+               for i in ingredients)
+
+
+def solid_mass(ingredients) -> float:
+    """국물이 되지 않고 고형으로 남는 무게."""
+    return sum(SOLID_RATIO.get(i["name"], 0.5) * i.get("qty_g", 0)
+               for i in ingredients)
+
+
 ALIAS = {
     "두부": ("두부", "연두부", "순두부", "부침두부", "손두부"),
     "닭고기": ("닭고기", "닭가슴살", "닭안심", "닭다리", "훈제닭"),
@@ -232,11 +264,16 @@ def build_tasks(constraints: dict) -> list:
 
     def _prep_bind(ctx):
         return {"record": ctx["record"], "weigh": K.prep_weigh,
-                "available": lambda n: K.fridge_check(n) is not None}
+                "available": lambda n: K.fridge_check(n) is not None,
+                "absorb_of": absorb_capacity, "solid_of": solid_mass}
 
     def _prep_absorb(ctx, out):
         ctx["mass_g"] = out["total_mass_g"]
         ctx["add_later"] = out.get("add_later") or []
+        ctx["absorb_cap_g"] = out.get("absorb_cap_g") or 0.0
+        ctx["solid_g"] = out.get("solid_g") or 0.0
+        ctx["water_added_g"] = out.get("water_added_g") or 0.0
+        ctx["scum_g"] = scum_amount(ctx["record"].get("ingredients", []))
         ctx["extra_water_g"] = out["extra_water_g"]
         ctx["prep_missing"] = out["missing"]
         ctx["prep_short"] = out.get("short_g") or None
@@ -244,10 +281,44 @@ def build_tasks(constraints: dict) -> list:
     def _converge_setup(ctx):
         spec = K.device_spec(constraints.get("device") or "")
         K.COOKER.start(ctx["mass_g"], ctx["extra_water_g"], power=3,
-                       capacity_g=spec.get("capacity_g"))
+                       capacity_g=spec.get("capacity_g"),
+                       solid_g=ctx.get("solid_g", 0.0),
+                       absorb_cap_g=ctx.get("absorb_cap_g", 0.0))
+
+    def _make_recover(ctx):
+        """지나쳤을 때 물을 부어 되돌린다 — 다만 묽어지는 만큼만."""
+        MAX_DILUTION = 0.06          # 6% 넘게 묽어지면 되돌리지 않는다
+
+        def recover(st, target, cur):
+            if cur >= target:        # 덜 졸았으면 물을 부을 일이 아니다
+                return None
+            base = st.get("initial_mass_g") or 0
+            need = (target - cur) * base
+            if need <= 0:
+                return None
+            if (st.get("watered_g", 0) + need) / max(1.0, st["mass_g"]) > MAX_DILUTION:
+                ctx["recover_declined"] = (
+                    f"{round(need)}g 을 부으면 {MAX_DILUTION:.0%} 넘게 묽어진다 "
+                    f"— 되돌리지 않고 지나친 채로 알린다")
+                return None
+            e = K.COOKER.add_water(need)
+            if not e:
+                return None
+            ctx["recovered"] = (f"{e['grams']}g 을 부어 목표로 되돌렸다 "
+                                f"(국물이 {e['dilution']:.1%} 묽어졌다)")
+            return {"note": ctx["recovered"], "water_g": e["grams"]}
+        return recover
 
     def _cook_guard(st):
         """이상 감지. 넘칠 것 같으면 화력을 묶는다."""
+        # 국물이 바닥나면 증발이 멎고 바닥이 탄다. 목표 질량비는 영원히
+        # 오지 않는다 — 기다리지 말고 멈춰야 한다.
+        if st.get("free_ratio", 1.0) <= 0.02:
+            return {"stop": True,
+                    "note": (f"국물이 바닥났다 (자유 수분 "
+                             f"{st.get('free_liquid_g', 0)}g) — 재료가 물을 "
+                             f"다 빨아들였다. 더 졸일 물이 없으므로 여기서 "
+                             f"멈춘다. 물을 더 붓고 다시 시작해야 한다")}
         risk = st.get("overflow_risk", 0.0)
         if risk >= 0.45:
             return {"limit_power": 2,
@@ -260,11 +331,59 @@ def build_tasks(constraints: dict) -> list:
         return None
 
     def _make_stage_hook(ctx):
-        """조리 단계를 진행시키는 훅. 무엇을 언제 넣는지는 도메인이 안다."""
+        """조리 단계를 진행시키는 훅. 무엇을 언제 어떻게 하는지는 도메인이 안다.
+
+        조리는 '넣고 기다리기' 가 아니다. 뚜껑을 여닫고, 거품을 걷고, 젓는다.
+        제어기(converge)는 이 중 아무것도 모르고, 훅으로 물어보기만 한다.
+        """
         pending = list(ctx.get("add_later") or [])
         pending.sort(key=lambda x: -x["at_ratio"])     # 먼저 넣을 것부터
+        scum_left = [ctx.get("scum_g", 0.0)]
+        lid_opened = [False]          # 한 번 열면 끝까지 연다
+        ctx.setdefault("kitchen_acts", [])
 
         def hook(state):
+            # (1) 뚜껑 — 끓을 때까지 덮고, 끓으면 열어 **끝까지 열어 둔다.**
+            #     온도 한 점을 기준으로 여닫으면 그 근처에서 계속 뒤집힌다.
+            #     실제로 채터링이 나서 제어가 무너졌다(0.78 목표에 0.61).
+            if not lid_opened[0]:
+                if state["temp_c"] >= 97.0:
+                    lid_opened[0] = True
+                    K.COOKER.set_lid(False)
+                    ctx["kitchen_acts"].append("뚜껑 엶")
+                    return {"note": ("끓었다 → 뚜껑을 연다 "
+                                     "(덮은 채로는 졸지 않는다). 증발이 갑자기 "
+                                     "빨라지므로 주기를 줄여 다시 본다"),
+                            "resets_baseline": False, "slow_down": True}
+                if not state.get("lid"):
+                    K.COOKER.set_lid(True)
+                    ctx["kitchen_acts"].append("뚜껑 덮음")
+                    return {"note": "뚜껑을 덮는다 — 빨리 끓는다",
+                            "resets_baseline": False}
+
+            # (2) 거품 — 고기를 삶으면 뜬다. 걷어낸 양은 증발이 아니다.
+            #     분모에서 빼 주지 않으면 제어기가 졸아든 것으로 착각한다.
+            if scum_left[0] > 0 and state["temp_c"] >= 96.0:
+                e = K.COOKER.skim(scum_left[0], "거품")
+                scum_left[0] = 0.0
+                if e:
+                    ctx["kitchen_acts"].append(f"거품 {e['grams']}g 걷음")
+                    return {"note": (f"거품 {e['grams']}g 을 걷어낸다 — 질량이 줄지만 "
+                                     f"증발이 아니므로 기준에서 뺀다"),
+                            "resets_baseline": True}
+
+            # (3) 젓기 — 눌어붙기 시작하면 사용자에게 알린다.
+            #     제안서 표1 에서 교반은 사람이 맡는 일로 적었다.
+            if (state.get("soil_score", 0) >= 0.40
+                    and state.get("stir_since_min", 0) >= 6.0):
+                K.COOKER.stir()
+                ctx["stir_prompts"] = ctx.get("stir_prompts", 0) + 1
+                ctx["kitchen_acts"].append("저어 달라고 알림")
+                return {"note": (f"눌어붙음 {state['soil_score']} — "
+                                 f"\"지금 한 번 저어 주세요\" 안내"),
+                        "resets_baseline": False}
+
+            # (4) 중간 투입
             if not pending:
                 return None
             nxt = pending[0]
@@ -299,14 +418,15 @@ def build_tasks(constraints: dict) -> list:
                 "metric": "mass_ratio",
                 "target": ctx["record"]["target_mass_ratio"],
                 "direction": "down", "ready_key": "temp_c", "ready_at": 92.0,
-                # 양이 많으면 오래 걸린다. 4인분 960g 에서 관측 30회(=30분)
-                # 상한에 먼저 걸려 99.5% 에서 멈췄다. 상한은 '못 끝낼 때
-                # 멈추는 장치' 이지 정상 조리를 끊는 값이면 안 된다.
-                "max_steps": 60,
+                # 상한은 관측 횟수가 아니라 **시간**으로 둔다. 주기를 줄이면
+                # 짧은 조리도 횟수 상한에 걸리기 때문이다. 사용자의 시간
+                # 예산 안에서 끝나야 하므로 그 값을 쓴다.
+                "max_steps": 400,
+                "max_minutes": min(45, constraints.get("budget_min") or 45),
                 "min_controllable": min_ctrl, "amount_key": "initial_mass_g",
                 "on_observe": _make_stage_hook(ctx),
                 # 기기가 자기 여열을 안다. 제어기는 그 값을 받아 앞당겨 끈다.
-                "guard": _cook_guard,
+                "guard": _cook_guard, "recover": _make_recover(ctx),
                 "residual": lambda st: (K.COOKER.predict_residual_g()
                                         / st["initial_mass_g"]
                                         if st.get("initial_mass_g") else 0.0)}
@@ -331,6 +451,13 @@ def build_tasks(constraints: dict) -> list:
         # 기록은 **먹기 직전** 상태로 남긴다. 불을 끄는 순간의 값을 저장하면
         # 재현할 때 그 지점에서 또 여열이 붙어 회차마다 더 졸아든다.
         rested = K.COOKER.rest_until_still()
+        # 되돌리기는 **여열까지 끝난 뒤** 해야 한다. 불을 끈 시점에 맞춰
+        # 물을 부어도 여열이 남아 있으면 다시 졸아든다.
+        _tgt = ctx["record"]["target_mass_ratio"]
+        if rested["mass_ratio"] < _tgt - 1e-3:
+            _fix = _make_recover(ctx)(rested, _tgt, rested["mass_ratio"])
+            if _fix:
+                rested = K.COOKER.state()
         ctx["off_ratio"] = out["final"]                 # 불 끄는 순간
         ctx["final_ratio"] = rested["mass_ratio"]       # 먹기 직전 (저장 대상)
         ctx["rest_drop"] = round(out["final"] - rested["mass_ratio"], 4)
@@ -463,6 +590,17 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["중단"] = f"{ctx['halted_at']} 에서 멈춤 — {ctx['halt_reason']}"
         if ctx.get("guard_notes"):
             metrics["이상 감지"] = " / ".join(ctx["guard_notes"])
+        if ctx.get("recovered"):
+            metrics["되돌림"] = ctx["recovered"]
+        if ctx.get("recover_declined"):
+            metrics["되돌리지 않음"] = ctx["recover_declined"]
+        if ctx.get("stir_prompts"):
+            metrics["교반 안내"] = f"{ctx['stir_prompts']}회 (사람이 하는 일 — 표1)"
+        if ctx.get("kitchen_acts"):
+            metrics["조리 중 조작"] = " / ".join(ctx["kitchen_acts"])
+        if ctx.get("water_added_g"):
+            metrics["물 보충"] = (f"재료가 빨아들일 {ctx['water_added_g']}g 을 "
+                              f"미리 더 부었다")
         if ctx.get("scale_basis"):
             metrics["조리량"] = (ctx["scale_basis"]
                               + (" · 기기 용량에 걸림" if ctx.get("scale_capped") else ""))

@@ -135,7 +135,8 @@ class PrepSkill(Skill):
     provides = ("measured",)
 
     def run(self, record: dict, weigh, available,
-            min_fill_ratio: float = 0.5, **_) -> SkillResult:
+            min_fill_ratio: float = 0.5,
+            absorb_of=None, solid_of=None, **_) -> SkillResult:
         total, extra, ev, missing = 0.0, 0.0, [], []
         short = {}
         # 계량은 전부 하지만 **처음부터 냄비에 들어가는 것**은 일부다.
@@ -179,13 +180,44 @@ class PrepSkill(Skill):
                          if w["expected_extra_water_g"] else "")
                       + (f"  ⚠ {w['short_g']}g 모자람" if w.get("short_g") else ""))
 
+        # 재료가 빨아들일 물을 **미리 채운다.**
+        #
+        # 찹쌀 400g 은 국물을 800g 쯤 먹는다. 레시피에는 "물 적당히" 라고만
+        # 적혀 있어서, 기록된 초기 질량대로만 담으면 조리 중에 국물이 바닥나고
+        # 바닥이 탄다. 질량비만 보는 제어기는 그 순간을 눈치채지 못한다
+        # (실제로 목표 0.85 를 노리다 0.9336 에서 멈추고 눌어붙음이 1.0 이 됐다).
+        placed = [i for i in record.get("ingredients", [])
+                  if i.get("add_at") is None] + [
+            {"name": x["name"], "qty_g": x["grams"]} for x in later]
+        absorb_g = absorb_of(placed) if absorb_of else 0.0
+        solid_g = solid_of(placed) if solid_of else 0.0
+
         # 기록에 없는 나머지(국물 등)는 기록된 초기 질량으로 맞춘다.
         # 나중에 넣을 재료는 아직 냄비에 없으므로 여기서 빼 둔다.
         listed = sum(i["qty_g"] for i in record.get("ingredients", []))
         total += record.get("initial_mass_g", 0) - listed
         total -= sum(x["grams"] for x in later)
+
+        water_added = 0.0
+        if absorb_g > 0:
+            # 빨아들일 만큼만 부으면 모자란다. **졸일 물까지** 있어야 한다.
+            #
+            #   총량 M 중 고형 S 와 흡수 A 는 졸일 수 없다.
+            #   목표 질량비 r 까지 가려면 M(1-r) 을 날려야 하므로
+            #   자유 수분 M - S - A ≥ M(1-r),  즉  M ≥ (S+A)/r 이어야 한다.
+            #
+            # 흡수량만 채웠다가 삼계탕이 0.9352 에서 국물이 바닥나 멈췄다.
+            r = record.get("target_mass_ratio") or 1.0
+            need_total = (solid_g + absorb_g) / max(0.05, r) * 1.05   # 5% 여유
+            water_added = round(max(absorb_g, need_total - total), 1)
+            total += water_added
+            ev.append(f"재료가 물 {round(absorb_g)}g 을 빨아들인다. "
+                      f"목표 {r} 까지 졸이려면 고형 {round(solid_g)}g + 흡수분을 "
+                      f"빼고도 졸일 물이 남아야 하므로 총 {round(need_total)}g 필요 "
+                      f"→ {water_added}g 을 더 붓는다")
         ev.append(f"총 {round(total)}g (기록 {record.get('initial_mass_g')}g), "
-                  f"추가 수분 합 {round(extra, 1)}g")
+                  f"추가 수분 합 {round(extra, 1)}g"
+                  + (f", 고형분 {round(solid_g)}g" if solid_g else ""))
         if short:
             ev.append("재고가 모자라 목표보다 적게 담은 재료: "
                       + ", ".join(f"{k} {v}g" for k, v in short.items())
@@ -198,6 +230,9 @@ class PrepSkill(Skill):
                                          f"않았거나 재고가 목표의 절반에 못 미친다"
                                          if missing else None),
                             "add_later": later,
+                            "absorb_cap_g": round(absorb_g, 1),
+                            "solid_g": round(solid_g, 1),
+                            "water_added_g": water_added,
                             "missing": missing, "short_g": short}, ev)
 
 

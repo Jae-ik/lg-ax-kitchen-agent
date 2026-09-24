@@ -248,10 +248,23 @@ class Cooker:
     soil: float = 0.0                 # 눌어붙음 누적 (0~1)
     added_g: float = 0.0              # 조리 도중 넣은 양 (중간 투입)
     capacity_g: float = 1100.0        # 이 냄비에 담기는 최대량
+    solid_g: float = 0.0              # 고형분 (재료 자체 무게)
+    absorbed_g: float = 0.0           # 재료가 빨아들인 물
+    absorb_cap_g: float = 0.0         # 재료가 더 먹을 수 있는 양
+    skimmed_g: float = 0.0            # 걷어낸 양 (거품·기름)
+    watered_g: float = 0.0            # 되돌리려고 부은 물
+    lid: bool = False                 # 뚜껑
+    stir_since_min: float = 0.0       # 마지막으로 저은 뒤 지난 시간
 
     # 열 모델 상수. 모두 **시뮬레이터 가정**이며 실측이 아니다.
     # 실제 기기에서는 냄비별로 재서 채워 넣어야 하는 자리다.
     HEAT_K: float = 0.55              # 데워지는 속도
+    ABSORB_RATE: float = 0.35         # 분당 흡수 속도 (남은 용량의 비율)
+    LID_EVAP: float = 0.15            # 뚜껑을 덮으면 증발이 이 비율로 준다
+    LID_HEAT: float = 1.30            # 뚜껑을 덮으면 이만큼 빨리 데워진다
+    LID_TEMP_GAIN: float = 18.0       # 뚜껑을 덮으면 도달 온도가 이만큼 오른다
+    STIR_RELIEF: float = 0.55         # 저으면 그 뒤 눌어붙음이 이 비율로 준다
+
     # 물 620g 을 100→90도로 식히는 열이 전부 증발에 쓰이면 약 11g 이다.
     # 실제로는 냄비와 공기로도 빠져나가므로 그보다 적다. 아래 값은 여열이
     # 5~10g(질량비 0.01 안팎) 나오도록 잡은 것이며, 실측으로 교체해야 한다.
@@ -276,11 +289,67 @@ class Cooker:
         boil = max(0.0, (self.temp_c - 95) / 5)          # 95도부터 거품이 인다
         return round(min(1.0, fill * boil * (self.power / 5)), 3)
 
+    def free_liquid_g(self) -> float:
+        """졸일 수 있는 **자유 수분**. 고형분과 재료가 빨아들인 물은 뺀다.
+
+        찹쌀 100g 은 국물을 200g 쯤 먹는다. 먹어도 **총 질량은 그대로**라
+        질량비만 보면 아무 일도 없는 것처럼 보이지만, 국물은 줄어 있다.
+        자유 수분이 바닥나면 증발이 멎고 바닥이 타기 시작한다 —
+        질량비만 쫓는 제어기는 그 순간을 영원히 기다린다.
+        """
+        return max(0.0, self.mass_g - self.solid_g - self.absorbed_g)
+
+    def skim(self, grams: float, what: str = "거품"):
+        """거품·기름을 걷어낸다. 질량이 주는데 이것은 증발이 아니다."""
+        if not self.running or grams <= 0:
+            return None
+        take = min(grams, max(0.0, self.mass_g - self.solid_g))
+        self.mass_g -= take
+        self.skimmed_g += take
+        # 걷어낸 만큼 분모에서도 뺀다. 그러지 않으면 제어기가 이것을
+        # 졸아든 것으로 읽어 목표에 일찍 닿았다고 착각한다.
+        self.initial_mass_g = max(1.0, self.initial_mass_g - take)
+        return {"what": what, "grams": round(take, 1),
+                "mass_g": round(self.mass_g, 1)}
+
+    def add_water(self, grams: float):
+        """물을 부어 되돌린다.
+
+        졸이는 것은 되돌릴 수 없다고 가정해 왔지만, 요리에는 되돌릴 수단이
+        하나 있다 — 물을 더 붓는 것이다. 다만 **공짜가 아니다.** 국물이
+        묽어진다. 그래서 얼마나 부었는지를 함께 남겨, 사용자가 판단할 수
+        있게 한다. 졸임 비율의 분모(총 투입량)는 건드리지 않는다.
+        """
+        if not self.running or grams <= 0:
+            return None
+        self.mass_g += grams
+        self.watered_g += grams
+        return {"grams": round(grams, 1), "mass_g": round(self.mass_g, 1),
+                "dilution": round(self.watered_g / max(1.0, self.mass_g), 4)}
+
+    def set_lid(self, closed: bool):
+        """뚜껑. 덮으면 빨리 끓고 증발은 거의 없다 — 졸이려면 열어야 한다."""
+        before = self.lid
+        self.lid = bool(closed)
+        return {"lid": self.lid, "changed": before != self.lid}
+
+    def stir(self):
+        """젓는다. 바닥에 가라앉은 것을 띄워 눌어붙음을 줄인다."""
+        if not self.running:
+            return None
+        self.stir_since_min = 0.0
+        return {"stirred_at_min": round(self.elapsed_min, 1),
+                "soil": round(self.soil, 4)}
+
     def start(self, initial_mass_g: float, extra_water_g: float = 0.0, power: int = 3,
-              capacity_g: float | None = None):
+              capacity_g: float | None = None, solid_g: float = 0.0,
+              absorb_cap_g: float = 0.0, lid: bool = False):
         self.running = True
         if capacity_g:
             self.capacity_g = capacity_g
+        self.solid_g = solid_g
+        self.absorb_cap_g = absorb_cap_g
+        self.lid = lid
         self.elapsed_min = 0.0
         self.initial_mass_g = initial_mass_g + extra_water_g
         self.mass_g = self.initial_mass_g
@@ -289,6 +358,10 @@ class Cooker:
         self.power = power
         self.soil = 0.0
         self.added_g = 0.0
+        self.absorbed_g = 0.0
+        self.skimmed_g = 0.0
+        self.watered_g = 0.0
+        self.stir_since_min = 0.0
         self.peak_temp_c = 20.0
         self.log = [(0.0, self.mass_g, self.temp_c)]
 
@@ -301,8 +374,13 @@ class Cooker:
         # **식는 속도는 데우는 속도보다 느리다** — 냄비와 내용물에 열이 남아
         # 있기 때문이다. 불을 꺼도 한동안 계속 끓는다. 예전 모델은 화력을 0 으로
         # 하면 증발이 즉시 멈춰, '미리 끄는' 판단이 필요 없는 세계였다.
-        target_t = 40 + self.power * 13
+        # 뚜껑을 덮으면 증기가 갇혀 열이 덜 빠진다. 같은 화력으로 **더 높은
+        # 온도까지** 오르고, 오르는 속도도 빠르다. 계수만 키우면 도달 온도가
+        # 그대로라 효과가 안 보인다(시험에서 78.5 vs 79.0 도로 거의 같았다).
+        target_t = 40 + self.power * 13 + (self.LID_TEMP_GAIN if self.lid else 0)
         k = self.HEAT_K if target_t > self.temp_c else self._cool_k(self.mass_g)
+        if self.lid and target_t > self.temp_c:
+            k = min(0.95, k * self.LID_HEAT)
         # k 는 **1분당** 비율이다. 그대로 쓰면 tick(0.5) 도 tick(1.0) 과 같은
         # 양만큼 온도를 바꾼다 — 관측을 자주 할수록 빨리 식는 세계가 된다.
         # 관측 주기를 가변으로 만들면서 이 갱신식을 그대로 둔 것이 원인이었고,
@@ -318,8 +396,19 @@ class Cooker:
         # 증발: 끓기 시작(약 90도) 이후 본격화.
         # 증발은 화력이 아니라 **온도**로 일어난다. 화력은 온도를 유지할 뿐이다.
         # 그래서 화력이 0 이어도 끓는 동안에는 계속 준다 — 이것이 여열이다.
+        # 재료가 국물을 빨아들인다. 총 질량은 그대로지만 졸일 수 있는 물이 준다.
+        room = max(0.0, self.absorb_cap_g - self.absorbed_g)
+        if room > 0 and self.temp_c > 60:
+            take = min(room * self.ABSORB_RATE * minutes, self.free_liquid_g())
+            self.absorbed_g += take
+
         boil = max(0.0, (t_mid - 88) / 12)
         evap = (self.BASE_EVAP + self.power * self.POWER_EVAP) * boil * minutes
+        # 뚜껑을 덮으면 증발한 물이 맺혀 돌아온다 — 졸지 않는다.
+        if self.lid:
+            evap *= self.LID_EVAP
+        # 자유 수분보다 많이 날아갈 수는 없다. 바닥나면 증발이 멎는다.
+        evap = min(evap, self.free_liquid_g())
         evap *= random.uniform(0.92, 1.08)          # 회차 간 편차
         self.mass_g = max(0.0, self.mass_g - evap)
 
@@ -327,9 +416,16 @@ class Cooker:
         # 화력이 셀수록 바닥에 눌어붙는다. 예전에는 이 값을 기록의 가정값으로
         # 두고 세척 코스를 골랐다 — 조리를 하고도 조리 결과를 안 본 셈이다.
         # 계수 0.30 은 시뮬레이터 값이며 실측이 아니다.
-        dryness = 1.0 - (self.mass_g / self.initial_mass_g) if self.initial_mass_g else 0.0
+        # 눌어붙음은 **자유 수분이 적을수록** 심해진다. 총 질량이 아니라
+        # 국물이 있느냐가 기준이다 — 찹쌀이 물을 다 먹으면 바닥이 탄다.
+        free_ratio = (self.free_liquid_g() / self.mass_g) if self.mass_g else 0.0
+        dryness = 1.0 - min(1.0, free_ratio / 0.5)      # 자유 수분 50% 이하부터
+        self.stir_since_min += minutes
+        # 저은 지 오래될수록 바닥에 가라앉은 것이 눌어붙는다
+        stir_factor = self.STIR_RELIEF if self.stir_since_min < 3 else 1.0
         self.soil = min(1.0, self.soil +
-                        boil * (0.30 + dryness) * (self.power / 5) * minutes * 0.30)
+                        boil * (0.30 + dryness) * (self.power / 5) * minutes
+                        * 0.30 * stir_factor)
         self.peak_temp_c = max(self.peak_temp_c, self.temp_c)
         self.log.append((round(self.elapsed_min, 1), round(self.mass_g, 1),
                          round(self.temp_c, 1)))
@@ -349,6 +445,14 @@ class Cooker:
                 # (평균 0.5286, 표준편차 0.0133).
                 "soil_sigma": round(self.soil * 0.025, 4),
                 "added_g": round(self.added_g, 1),
+                "free_liquid_g": round(self.free_liquid_g(), 1),
+                "free_ratio": round(self.free_liquid_g() / self.mass_g, 3)
+                if self.mass_g else 0.0,
+                "absorbed_g": round(self.absorbed_g, 1),
+                "skimmed_g": round(self.skimmed_g, 1),
+                "watered_g": round(self.watered_g, 1),
+                "lid": self.lid,
+                "stir_since_min": round(self.stir_since_min, 1),
                 "fill_ratio": round(self.mass_g / self.capacity_g, 3)
                 if self.capacity_g else 0.0,
                 "overflow_risk": self.overflow_risk(),

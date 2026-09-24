@@ -42,11 +42,12 @@ class ConvergeSkill(Skill):
             metric: str, target: float, direction: str = "down",
             power_key: str = "power", max_power: int = 5, max_steps: int = 30,
             ready_key: str | None = None, ready_at: float | None = None,
+            max_minutes: float | None = None,
             min_controllable: float | None = None,
             amount_key: str = "initial_mass_g",
             tolerance: float | None = 0.10,
             min_interval: float = 0.1,
-            on_observe=None, residual=None, guard=None,
+            on_observe=None, residual=None, guard=None, recover=None,
             **_) -> SkillResult:
 
         # 목표를 '넘어선 것' 과 '맞춘 것' 은 다르다.
@@ -97,6 +98,10 @@ class ConvergeSkill(Skill):
         cap = max_power             # 상황에 따라 낮아지는 실질 상한
         guard_notes = []
         for i in range(1, max_steps + 1):
+            # 상한은 **시간**이어야 한다. 관측 횟수로 두면 주기를 줄일수록
+            # 짧은 조리도 상한에 걸린다 — 18.75분짜리가 60회를 채워 멈췄다.
+            if max_minutes is not None and elapsed + dt > max_minutes:
+                break
             step(dt)
             elapsed += dt
             s = observe()
@@ -147,11 +152,43 @@ class ConvergeSkill(Skill):
                                       power_key: s.get(power_key),
                                       "event": ev_note.get("note")})
                         evidence.append(f"    기준을 {metric}={cur:.4f} 로 다시 잡는다")
-                    dt = 1.0          # 투입으로 조건이 바뀌었으니 주기도 되돌린다
+                    if ev_note.get("slow_down"):
+                        # 조건이 급변하는 일(뚜껑을 여는 것 등) 뒤에는
+                        # 직전 속도로 잰 ETA 가 쓸모없다. 뚜껑을 열면 증발이
+                        # 6배로 뛰고, 그대로 한 걸음 가면 목표를 크게 지나친다
+                        # (0.78 을 노리고 0.65 에서 끝났다). 주기를 줄여
+                        # 새 조건을 다시 파악한다.
+                        dt = max(min_interval, 0.25)
+                        evidence.append(f"    조건이 바뀌었다 → 주기를 {dt}분으로 "
+                                        f"줄여 다시 파악한다")
+                    elif ev_note.get("resets_baseline", True):
+                        # 투입처럼 조건이 바뀐 경우만 주기를 되돌린다.
+                        # 뚜껑·안내처럼 기준이 그대로인 일까지 되돌리면
+                        # 목표 앞에서 잘게 다가가던 것이 매번 풀려 지나친다.
+                        dt = 1.0
                     continue
 
             if reached(cur):
                 over = round(abs(target - cur), 4)
+                # 지나쳤으면 **되돌릴 수단이 있는지** 물어본다. 되돌리기는
+                # 공짜가 아니므로(국물이 묽어진다) 도메인이 판단해 거절할 수
+                # 있다. 거절하면 지나친 채로 보고한다.
+                # 되돌리기 판단은 **허용 오차가 아니라 목표와의 차이**로 한다.
+                # 허용 오차(0.10) 안이면 넘어가게 두었더니, 0.0242 지나친
+                # 것도 그대로 끝냈다. 되돌릴 수 있으면 되돌리는 게 맞다.
+                overshot_now = (cur < target - 1e-3 if direction == "down"
+                                else cur > target + 1e-3)
+                if overshot_now and recover is not None:
+                    fix = recover(s, target, cur)
+                    if fix:
+                        evidence.append(f"  ~ {fix.get('note', '되돌림')}")
+                        s = observe()
+                        cur = s[metric]
+                        over = round(abs(target - cur), 4)
+                        trace.append({"t": round(elapsed, 2),
+                                      metric: round(cur, 4),
+                                      "event": fix.get("note")})
+                        events.append({"t": round(elapsed, 2), **fix})
                 ok = on_target(cur)
                 if not ok:
                     evidence.append(
