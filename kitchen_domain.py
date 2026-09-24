@@ -170,7 +170,28 @@ def build_tasks(constraints: dict) -> list:
             ctx["record"] = recipe_to_record(src)
         else:
             ctx["record"] = K.record_get(rid)
-        ctx["missing"] = list(best["missing"])
+        # 고른 기록을 **우리 집 인원**에 맞춘다. 기기 용량이 상한이 된다.
+        # 이 한 단계가 없어서 4인 가구가 1인분(237g)을 조리하고 있었다.
+        hh = constraints.get("household_size")
+        if hh:
+            scaled = K.record_scale(ctx["record"], hh, constraints.get("device"))
+            ctx["scale_basis"] = scaled["scale_basis"]
+            ctx["scale_capped"] = scaled.get("capped_by_device")
+            ctx["record"] = scaled
+
+        # 인원에 맞춰 양이 바뀌었으니 부족분도 그 양으로 다시 본다.
+        need = ctx["record"].get("ingredients", [])
+        stock = {s["name"]: s for s in K.fridge_list_items()}
+        miss = []
+        for ing in need:
+            key = resolve_stock(ing["name"], stock)
+            if key is None:
+                miss.append(ing["name"])
+            else:
+                have = (stock.get(key) or {}).get("qty_g")
+                if have is not None and have < ing["qty_g"]:
+                    miss.append(ing["name"])
+        ctx["missing"] = miss
         ctx["menu_name"] = best["menu"]
         ctx["menu_from"] = "공개 레시피" if rid.startswith("pub_") else "저장된 기록"
 
@@ -215,12 +236,54 @@ def build_tasks(constraints: dict) -> list:
 
     def _prep_absorb(ctx, out):
         ctx["mass_g"] = out["total_mass_g"]
+        ctx["add_later"] = out.get("add_later") or []
         ctx["extra_water_g"] = out["extra_water_g"]
         ctx["prep_missing"] = out["missing"]
         ctx["prep_short"] = out.get("short_g") or None
 
     def _converge_setup(ctx):
-        K.COOKER.start(ctx["mass_g"], ctx["extra_water_g"], power=3)
+        spec = K.device_spec(constraints.get("device") or "")
+        K.COOKER.start(ctx["mass_g"], ctx["extra_water_g"], power=3,
+                       capacity_g=spec.get("capacity_g"))
+
+    def _cook_guard(st):
+        """이상 감지. 넘칠 것 같으면 화력을 묶는다."""
+        risk = st.get("overflow_risk", 0.0)
+        if risk >= 0.45:
+            return {"limit_power": 2,
+                    "note": (f"끓어넘침 위험 {risk} (냄비의 "
+                             f"{st.get('fill_ratio', 0):.0%} 가 찼고 {st['temp_c']}도) "
+                             f"→ 화력을 2 로 묶는다")}
+        if risk >= 0.30:
+            return {"limit_power": 3,
+                    "note": f"끓어넘침 위험 {risk} → 화력을 3 으로 묶는다"}
+        return None
+
+    def _make_stage_hook(ctx):
+        """조리 단계를 진행시키는 훅. 무엇을 언제 넣는지는 도메인이 안다."""
+        pending = list(ctx.get("add_later") or [])
+        pending.sort(key=lambda x: -x["at_ratio"])     # 먼저 넣을 것부터
+
+        def hook(state):
+            if not pending:
+                return None
+            nxt = pending[0]
+            if state["mass_ratio"] > nxt["at_ratio"]:
+                return None
+            pending.pop(0)
+            e = K.COOKER.add_ingredient(nxt["name"], nxt["grams"],
+                                        temp_c=nxt["temp_c"])
+            if not e:
+                return None
+            ctx.setdefault("stage_events", []).append(
+                {"name": nxt["name"], "at_ratio": nxt["at_ratio"],
+                 "grams": nxt["grams"], "temp_drop_c": e["temp_drop_c"]})
+            return {"note": (f"{nxt['name']} {nxt['grams']}g 투입 "
+                             f"(질량비 {nxt['at_ratio']} 시점) — 온도 "
+                             f"{e['temp_drop_c']}도 하강"
+                             + (f". {nxt['why']}" if nxt["why"] else "")),
+                    "resets_baseline": True}
+        return hook
 
     def _converge_bind(ctx):
         # 한 관측 주기(1분)에 증발하는 양보다 '졸일 양' 이 적으면 목표를 지나친다.
@@ -237,7 +300,13 @@ def build_tasks(constraints: dict) -> list:
                 "target": ctx["record"]["target_mass_ratio"],
                 "direction": "down", "ready_key": "temp_c", "ready_at": 92.0,
                 "max_steps": 30,
-                "min_controllable": min_ctrl, "amount_key": "initial_mass_g"}
+                "min_controllable": min_ctrl, "amount_key": "initial_mass_g",
+                "on_observe": _make_stage_hook(ctx),
+                # 기기가 자기 여열을 안다. 제어기는 그 값을 받아 앞당겨 끈다.
+                "guard": _cook_guard,
+                "residual": lambda st: (K.COOKER.predict_residual_g()
+                                        / st["initial_mass_g"]
+                                        if st.get("initial_mass_g") else 0.0)}
 
     def _converge_absorb(ctx, out):
         st = K.COOKER.state()
@@ -253,6 +322,9 @@ def build_tasks(constraints: dict) -> list:
             ctx["too_small"] = (f"목표를 {over} 지나쳤다 (허용 안) — "
                                 f"양이 적어 제어가 빡빡했다")
         ctx["overshoot"] = over
+        ctx["coasted_from"] = out.get("coasted_from")
+        ctx["guard_notes"] = out.get("guard_notes") or []
+        ctx["relights"] = out.get("relights") or 0
         K.COOKER.stop()
         ctx["cook_min"] = out["steps"]
         ctx["final_ratio"] = out["final"]
@@ -380,6 +452,21 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                                     f"실측 {ctx['final_ratio']}")
         if ctx.get("halted_at"):
             metrics["중단"] = f"{ctx['halted_at']} 에서 멈춤 — {ctx['halt_reason']}"
+        if ctx.get("guard_notes"):
+            metrics["이상 감지"] = " / ".join(ctx["guard_notes"])
+        if ctx.get("scale_basis"):
+            metrics["조리량"] = (ctx["scale_basis"]
+                              + (" · 기기 용량에 걸림" if ctx.get("scale_capped") else ""))
+        if ctx.get("coasted_from") is not None:
+            metrics["여열 마무리"] = (
+                f"{ctx['coasted_from']}분에 불을 끄고 여열로 마무리 "
+                f"(총 {ctx.get('cook_min')}분"
+                + (f", 모자라서 {ctx['relights']}회 다시 켬" if ctx.get("relights")
+                   else "") + ")")
+        if ctx.get("stage_events"):
+            metrics["중간 투입"] = " / ".join(
+                f"{e['name']} {e['grams']}g @{e['at_ratio']} (-{e['temp_drop_c']}도)"
+                for e in ctx["stage_events"])
         if ctx.get("border_note"):
             metrics["경계 판정"] = ctx["border_note"]
         if ctx.get("quiet_note"):

@@ -15,14 +15,19 @@ random.seed(7)
 RECORDS = {
     "rec_001": {
         "record_id": "rec_001",
+        "servings": 2,
         "menu": "된장찌개",
         "saved_by": "어머니",
         "device": "본가 6인용 조리기",
         "saved_at": "2026-08-14",
+        # add_at: 이 질량비가 되면 넣는다. 없으면 처음부터 넣는다.
+        # 두부를 처음부터 넣으면 오래 끓어 부서진다 — 조리법이 순서를 정하는
+        # 이유이고, "재료 투입 전후를 구분한다" 는 말이 뜻하는 바다.
         "ingredients": [                      # 준비 단계가 읽는다
             {"name": "배추", "qty_g": 200},
-            {"name": "두부", "qty_g": 150},
             {"name": "된장", "qty_g": 40},
+            {"name": "두부", "qty_g": 150, "add_at": 0.93,
+             "why": "일찍 넣으면 오래 끓어 부서진다", "temp_c": 8},
         ],
         "initial_mass_g": 620,                # 투입 직후 측정값
         "target_mass_ratio": 0.78,            # 초기 대비 78% 까지 졸임
@@ -33,14 +38,16 @@ RECORDS = {
     },
     "rec_002": {
         "record_id": "rec_002",
+        "servings": 2,
         "menu": "된장찌개",
         "saved_by": "본인",
         "device": "자취방 2인용 조리기",
         "saved_at": "2026-09-02",
         "ingredients": [
             {"name": "배추", "qty_g": 200},
-            {"name": "두부", "qty_g": 150},
             {"name": "된장", "qty_g": 35},
+            {"name": "두부", "qty_g": 150, "add_at": 0.93,
+             "why": "일찍 넣으면 오래 끓어 부서진다", "temp_c": 8},
         ],
         "initial_mass_g": 610,
         "target_mass_ratio": 0.88,            # 같은 메뉴, 덜 졸인 취향
@@ -51,14 +58,16 @@ RECORDS = {
     },
     "rec_003": {
         "record_id": "rec_003",
+        "servings": 2,
         "menu": "닭고기 표고 조림",
         "saved_by": "본인",
         "device": "자취방 2인용 조리기",
         "saved_at": "2026-08-30",
         "ingredients": [
             {"name": "닭고기", "qty_g": 400},
-            {"name": "표고버섯", "qty_g": 120},
             {"name": "간장", "qty_g": 50},
+            {"name": "표고버섯", "qty_g": 120, "add_at": 0.90,
+             "why": "먼저 넣으면 물러진다", "temp_c": 20},
         ],
         "initial_mass_g": 700,
         "target_mass_ratio": 0.72,            # 조림이라 더 졸인다
@@ -237,11 +246,41 @@ class Cooker:
     power: int = 0                    # 0~5
     extra_water_g: float = 0.0
     soil: float = 0.0                 # 눌어붙음 누적 (0~1)
+    added_g: float = 0.0              # 조리 도중 넣은 양 (중간 투입)
+    capacity_g: float = 1100.0        # 이 냄비에 담기는 최대량
+
+    # 열 모델 상수. 모두 **시뮬레이터 가정**이며 실측이 아니다.
+    # 실제 기기에서는 냄비별로 재서 채워 넣어야 하는 자리다.
+    HEAT_K: float = 0.55              # 데워지는 속도
+    # 물 620g 을 100→90도로 식히는 열이 전부 증발에 쓰이면 약 11g 이다.
+    # 실제로는 냄비와 공기로도 빠져나가므로 그보다 적다. 아래 값은 여열이
+    # 5~10g(질량비 0.01 안팎) 나오도록 잡은 것이며, 실측으로 교체해야 한다.
+    COOL_K: float = 0.04              # 식는 속도 (620g 기준)
+    REF_MASS_G: float = 620.0         # COOL_K 를 잰 기준 질량
+    BASE_EVAP: float = 3.5            # 끓는 동안 화력 없이도 나가는 양 g/분
+    POWER_EVAP: float = 5.83          # 화력 한 단계당 g/분 (화력3 에서 약 21g)
     peak_temp_c: float = 0.0
     log: list = field(default_factory=list)
 
-    def start(self, initial_mass_g: float, extra_water_g: float = 0.0, power: int = 3):
+    def overflow_risk(self) -> float:
+        """끓어넘칠 위험 (0~1).
+
+        국물이 냄비에 가득 찬 상태에서 화력을 올리면 넘친다. 제안서는
+        "가열 상한, 이상 감지, 사용자 개입 우선권을 먼저 구현한다" 고
+        적어 두었는데, 코드에는 화력 상한(5)만 있고 **이상 감지가 없었다.**
+        상한은 기기 사양이지 상황 판단이 아니다.
+        """
+        if not self.running or self.capacity_g <= 0:
+            return 0.0
+        fill = self.mass_g / self.capacity_g
+        boil = max(0.0, (self.temp_c - 95) / 5)          # 95도부터 거품이 인다
+        return round(min(1.0, fill * boil * (self.power / 5)), 3)
+
+    def start(self, initial_mass_g: float, extra_water_g: float = 0.0, power: int = 3,
+              capacity_g: float | None = None):
         self.running = True
+        if capacity_g:
+            self.capacity_g = capacity_g
         self.elapsed_min = 0.0
         self.initial_mass_g = initial_mass_g + extra_water_g
         self.mass_g = self.initial_mass_g
@@ -249,6 +288,7 @@ class Cooker:
         self.temp_c = 20.0
         self.power = power
         self.soil = 0.0
+        self.added_g = 0.0
         self.peak_temp_c = 20.0
         self.log = [(0.0, self.mass_g, self.temp_c)]
 
@@ -257,12 +297,18 @@ class Cooker:
         if not self.running:
             return
         self.elapsed_min += minutes
-        # 온도: 화력에 따라 100도까지 상승
+        # 온도: 화력에 따라 100도까지 상승.
+        # **식는 속도는 데우는 속도보다 느리다** — 냄비와 내용물에 열이 남아
+        # 있기 때문이다. 불을 꺼도 한동안 계속 끓는다. 예전 모델은 화력을 0 으로
+        # 하면 증발이 즉시 멈춰, '미리 끄는' 판단이 필요 없는 세계였다.
         target_t = 40 + self.power * 13
-        self.temp_c += (min(target_t, 100) - self.temp_c) * 0.55
-        # 증발: 끓기 시작(약 90도) 이후 본격화
+        k = self.HEAT_K if target_t > self.temp_c else self._cool_k(self.mass_g)
+        self.temp_c += (min(target_t, 100) - self.temp_c) * k
+        # 증발: 끓기 시작(약 90도) 이후 본격화.
+        # 증발은 화력이 아니라 **온도**로 일어난다. 화력은 온도를 유지할 뿐이다.
+        # 그래서 화력이 0 이어도 끓는 동안에는 계속 준다 — 이것이 여열이다.
         boil = max(0.0, (self.temp_c - 88) / 12)
-        evap = self.power * 7.0 * boil * minutes
+        evap = (self.BASE_EVAP + self.power * self.POWER_EVAP) * boil * minutes
         evap *= random.uniform(0.92, 1.08)          # 회차 간 편차
         self.mass_g = max(0.0, self.mass_g - evap)
 
@@ -291,7 +337,70 @@ class Cooker:
                 # 상대 표준편차 2.5% 는 파이프라인 120회에서 잰 값이다
                 # (평균 0.5286, 표준편차 0.0133).
                 "soil_sigma": round(self.soil * 0.025, 4),
+                "added_g": round(self.added_g, 1),
+                "fill_ratio": round(self.mass_g / self.capacity_g, 3)
+                if self.capacity_g else 0.0,
+                "overflow_risk": self.overflow_risk(),
                 "power": self.power}
+
+    def _cool_k(self, mass_g: float) -> float:
+        """식는 속도는 양에 따라 다르다.
+
+        작은 냄비는 빨리 식는다 — 열용량은 질량에 비례하는데 열이 빠져나가는
+        표면적은 질량의 2/3 제곱으로만 늘기 때문이다. 이것을 무시하고 상수로
+        두었더니, 237g 짜리 삼계탕에서 여열을 620g 기준으로 과대평가해
+        4.5분에 불을 껐다가 목표에 닿지 못했다.
+        """
+        return self.COOL_K * (self.REF_MASS_G / max(1.0, mass_g)) ** (1 / 3)
+
+    def predict_residual_g(self, horizon_min: int = 12) -> float:
+        """지금 불을 끄면 **앞으로 더 날아갈 양**.
+
+        숙련자는 목표에 닿고 나서 끄지 않는다. 닿기 전에 끈다 — 여열로
+        조금 더 가기 때문이다. 그 '조금' 이 얼마인지는 기기가 자기 열 모델로
+        안다. 제어기가 이 값을 모르면 항상 목표를 지나친다.
+        """
+        # tick 과 같은 순서로 계산해야 한다 — tick 은 온도를 먼저 낮추고
+        # 증발을 구한다. 순서를 뒤집으면 첫 항이 과대평가돼 3배 틀린다.
+        t, total, m = self.temp_c, 0.0, self.mass_g
+        for _ in range(horizon_min):
+            t += (40 - t) * self._cool_k(m)
+            boil = max(0.0, (t - 88) / 12)
+            if boil <= 0:
+                break
+            gone = self.BASE_EVAP * boil          # 화력 0 기준
+            total += gone
+            m = max(1.0, m - gone)                # 줄어든 양은 더 빨리 식는다
+        return round(total, 2)
+
+    def add_ingredient(self, name: str, grams: float, temp_c: float = 8.0):
+        """조리 도중 재료를 넣는다.
+
+        된장찌개에서 두부는 처음부터 넣지 않는다 — 부서진다. 그런데 지금까지
+        이 시뮬레이터는 모든 재료를 한 번에 넣고 졸이기만 했다. 제안서는
+        "재료 투입 전후를 구분한 뒤 같은 조리 단계의 목표와 현재 상태를
+        비교한다" 고 적어 두었는데, 코드에는 조리 단계가 없었다.
+
+        투입은 두 가지를 바꾼다.
+          1) 질량이 **늘어난다** — 졸임 정도의 분모(총 투입량)도 같이 늘어야 한다.
+             분모를 그대로 두면 비율이 1 을 넘어 목표 판정이 깨진다.
+          2) 온도가 **떨어진다** — 찬 재료가 열을 가져간다. 다시 끓기까지
+             걸리는 시간이 실제 조리 시간의 큰 몫이다.
+        """
+        if not self.running or grams <= 0:
+            return None
+        before_t = self.temp_c
+        # 섞인 뒤 온도 = 질량가중 평균 (비열은 같다고 본다 — 물 기준 근사)
+        total = self.mass_g + grams
+        self.temp_c = (self.mass_g * self.temp_c + grams * temp_c) / total
+        self.mass_g = total
+        self.initial_mass_g += grams          # 졸임 비율의 분모도 늘린다
+        self.added_g += grams
+        self.log.append((round(self.elapsed_min, 1), round(self.mass_g, 1),
+                         round(self.temp_c, 1)))
+        return {"name": name, "grams": grams,
+                "temp_drop_c": round(before_t - self.temp_c, 1),
+                "mass_g": round(self.mass_g, 1)}
 
     def set_power(self, level: int):
         self.power = max(0, min(5, int(level)))
@@ -437,6 +546,44 @@ def record_save(base: dict, measured: dict, saved_by: str = "본인",
     }
     RECORDS[rid] = rec
     return rec
+
+
+def record_scale(rec: dict, to_servings: int, device: str | None = None) -> dict:
+    """기록을 우리 집 인원에 맞춰 늘리거나 줄인다.
+
+    지금까지 가구원 수는 '세척까지 할지' 를 정하는 데만 쓰였다. 그래서
+    4인 가구가 1인분짜리 공개 레시피(237g)를 그대로 조리했다 — 한 사람
+    몫도 안 되는 양이다. 몇 인분을 만들지는 **조리의 첫 번째 결정**인데
+    그것이 빠져 있었다.
+
+    기기 용량은 상한이다. 4인분이 냄비에 안 들어가면 들어가는 만큼만 한다.
+    """
+    src = max(1, rec.get("servings", 1))
+    ratio = to_servings / src
+    why = f"{src}인분 기록 → {to_servings}인분 = {ratio:.3g}배"
+
+    base = rec.get("initial_mass_g") or sum(
+        i["qty_g"] for i in rec.get("ingredients", []))
+    spec = device_spec(device or "")
+    capped = False
+    if spec:
+        limit = spec["capacity_g"] * FILL_LIMIT
+        if base * ratio > limit:
+            ratio = limit / base
+            capped = True
+            why += (f" 인데 {round(base * to_servings / src)}g 은 {device} 상한 "
+                    f"{spec['capacity_g']}g 의 {FILL_LIMIT:.0%} 를 넘는다 "
+                    f"→ {ratio:.3g}배로 제한")
+
+    out = dict(rec)
+    out["ingredients"] = [{**i, "qty_g": max(1, round(i["qty_g"] * ratio))}
+                          for i in rec.get("ingredients", [])]
+    if rec.get("initial_mass_g"):
+        out["initial_mass_g"] = round(rec["initial_mass_g"] * ratio)
+    out["servings"] = round(src * ratio, 1)
+    out["scale_basis"] = why
+    out["capped_by_device"] = capped
+    return out
 
 
 # ══════════════════════════ 기기 간 기록 이식 ══════════════════════════

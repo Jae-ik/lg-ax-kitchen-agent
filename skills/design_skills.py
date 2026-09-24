@@ -77,6 +77,13 @@ class SituationReadSkill(Skill):
         if na:
             ev.append(f"저염 권고 {na}mg → 후보 자료를 영양 기준으로 거른다")
 
+        # 몇 인분을 만들지는 조리의 첫 결정이다. 가구원 수와 그 집 조리기의
+        # 용량이 함께 정한다 — 4인분이 냄비에 안 들어가면 들어가는 만큼만 한다.
+        constraints["household_size"] = persona.get("household_size", 1)
+        constraints["device"] = persona.get("device")
+        ev.append(f"{constraints['household_size']}인 가구 · "
+                  f"{constraints['device'] or '기기 미지정'} → 조리량을 그에 맞춘다")
+
         constraints["budget_min"] = commute if constraints.get("preorder") else budget
         constraints["commute_min"] = commute
 

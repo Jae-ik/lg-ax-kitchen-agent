@@ -276,6 +276,98 @@ def t24():
             f"화력={power_after}(0이어야 함) 복구안={r.output['recovery'][:46]}")
 
 
+@case("냄비를 가득 채우고 조리 (끓어넘침을 잡는가)")
+def t25():
+    K.reset()
+    K.COOKER.start(1000, 0, power=3, capacity_g=1100)
+    notes = []
+
+    def guard(st):
+        r = st.get("overflow_risk", 0)
+        if r >= 0.45:
+            return {"limit_power": 2, "note": f"위험 {r} → 화력 2"}
+        if r >= 0.30:
+            return {"limit_power": 3, "note": f"위험 {r} → 화력 3"}
+        return None
+
+    r = REGISTRY.get("converge").run(
+        observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
+        step=K.COOKER.tick, metric="mass_ratio", target=0.80,
+        direction="down", ready_key="temp_c", ready_at=92.0,
+        max_steps=40, guard=guard)
+    peak = max(t.get("power", 0) for t in r.output["trace"] if "power" in t)
+    K.COOKER.stop()
+    return (f"최고 화력 {peak}(상한 5인데 묶였는가) · {r.output['steps']}분 · "
+            f"감지 {r.output.get('guard_notes')}")
+
+
+@case("여열 예측이 과대할 때 헛돌지 않는가")
+def t26():
+    K.reset()
+    K.COOKER.start(300, 0, power=3, capacity_g=1100)
+    r = REGISTRY.get("converge").run(
+        observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
+        step=K.COOKER.tick, metric="mass_ratio", target=0.80,
+        direction="down", ready_key="temp_c", ready_at=92.0, max_steps=40,
+        residual=lambda st: 0.25)          # 일부러 크게 속인다
+    K.COOKER.stop()
+    return (f"ok={r.ok} {r.output['steps']}분 최종 {r.output['final']} "
+            f"여열시작 {r.output.get('coasted_from')} "
+            f"부족 {r.output.get('coast_short')}")
+
+
+@case("여열로 마무리하면 지나침이 줄어드는가")
+def t27():
+    out = []
+    for use in (False, True):
+        K.reset(seed=11)
+        K.COOKER.start(620, 0, power=3, capacity_g=1100)
+        kw = {}
+        if use:
+            kw["residual"] = lambda st: (K.COOKER.predict_residual_g()
+                                         / st["initial_mass_g"])
+        r = REGISTRY.get("converge").run(
+            observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
+            step=K.COOKER.tick, metric="mass_ratio", target=0.78,
+            direction="down", ready_key="temp_c", ready_at=92.0,
+            max_steps=40, **kw)
+        K.COOKER.stop()
+        out.append(f"{'여열O' if use else '여열X'} {r.output['final']} "
+                   f"(지나침 {abs(0.78 - r.output['final']):.4f})")
+    return " / ".join(out)
+
+
+@case("4인분이 냄비에 안 들어갈 때")
+def t28():
+    K.reset()
+    r = K.record_scale(K.RECORDS["rec_001"], 8, "원룸 1인용 조리기")
+    return f"{r['initial_mass_g']}g · {r['scale_basis']} · 걸림={r['capped_by_device']}"
+
+
+@case("중간 투입이 기준을 다시 잡는가")
+def t29():
+    K.reset()
+    K.COOKER.start(470, 0, power=3, capacity_g=1100)
+    done = [False]
+
+    def hook(st):
+        if not done[0] and st["mass_ratio"] <= 0.93:
+            done[0] = True
+            e = K.COOKER.add_ingredient("두부", 150, temp_c=8)
+            return {"note": f"두부 투입 -{e['temp_drop_c']}도", "resets_baseline": True}
+        return None
+
+    r = REGISTRY.get("converge").run(
+        observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
+        step=K.COOKER.tick, metric="mass_ratio", target=0.78,
+        direction="down", ready_key="temp_c", ready_at=92.0,
+        max_steps=40, on_observe=hook)
+    K.COOKER.stop()
+    over_one = [t for t in r.output["trace"] if t.get("mass_ratio", 0) > 1.0]
+    return (f"{r.output['steps']}분 최종 {r.output['final']} · 투입 "
+            f"{len(r.output['events'])}회 · 비율이 1 을 넘은 관측 {len(over_one)}건")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("t") and callable(v) and hasattr(v, "_name")]

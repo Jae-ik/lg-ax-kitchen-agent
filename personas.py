@@ -8,9 +8,11 @@
 '직무를 반복 수행하는 Agent' 의 증거다.
 """
 
+# device: 이 집의 조리기. 인원에 맞춰 양을 늘릴 때 **용량 상한**이 된다.
 PERSONAS = {
     "p1_야근": {
         "id": "p1_야근",
+        "device": "원룸 1인용 조리기",
         "label": "야근이 잦은 1인 가구",
         "household_size": 1,
         "arrive_home": "21:40",
@@ -34,6 +36,7 @@ PERSONAS = {
     },
     "p2_맞벌이": {
         "id": "p2_맞벌이",
+        "device": "자취방 2인용 조리기",
         "label": "맞벌이 2인 가구",
         "household_size": 2,
         "arrive_home": "19:20",
@@ -55,6 +58,7 @@ PERSONAS = {
     },
     "p3_알레르기": {
         "id": "p3_알레르기",
+        "device": "본가 6인용 조리기",
         "label": "알레르기 가족이 있는 4인 가구",
         "household_size": 4,
         "arrive_home": "18:30",
@@ -80,6 +84,7 @@ PERSONAS = {
 
     "p4_퇴근길": {
         "id": "p4_퇴근길",
+        "device": "원룸 1인용 조리기",
         "label": "퇴근길 1인 가구",
         "household_size": 1,
         # 퇴근 시각과 이동 시간이 있으면 에이전트가 '집에 없는 동안' 을 쓸 수 있다.

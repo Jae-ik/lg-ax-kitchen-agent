@@ -90,8 +90,8 @@
      "saved_by": "본인",
      "missing": [
       "닭고기",
-      "표고버섯",
-      "간장"
+      "간장",
+      "표고버섯"
      ],
      "short_g": {},
      "uses_urgent": [],
@@ -100,6 +100,7 @@
     }
    ],
    "dropped": [],
+   "recovery": null,
    "best": {
     "record_id": "rec_001",
     "menu": "된장찌개",
@@ -151,7 +152,7 @@
  },
  {
   "stage": "EXECUTE",
-  "text": "계량 완료 — 총 620g (기록 620g), 추가 수분 19.9g 예상",
+  "text": "계량 완료 — 총 619g (기록 620g), 추가 수분 19.9g 예상",
   "data": null
  },
  {
@@ -165,12 +166,16 @@
   "data": {
    "reached": true,
    "observations": 10,
-   "steps": 7.8,
-   "final": 0.7778,
+   "steps": 8.1,
+   "final": 0.778,
    "target": 0.78,
    "too_small": false,
+   "events": [],
+   "coasted_from": null,
+   "guard_notes": [],
+   "relights": 0,
    "overshot": false,
-   "overshoot": 0.0022
+   "overshoot": 0.002
   }
  },
  {
@@ -194,6 +199,12 @@
    "rewash_prob": 0.05,
    "noise_db": 52,
    "quiet_note": null,
+   "need_probs": {
+    "0": 0.0,
+    "1": 0.0,
+    "2": 1.0
+   },
+   "course_by_cut": "강력(불림 포함)",
    "expected_water_l": 16.8,
    "baseline_course": "표준",
    "baseline_expected_water_l": 18.2,
@@ -207,9 +218,9 @@
  },
  {
   "stage": "OUTPUT",
-  "text": "된장찌개(어머니 기록) 완료 — 7.8분에 목표 0.78 도달",
+  "text": "된장찌개(어머니 기록) 완료 — 8.1분에 목표 0.78 도달",
   "data": {
-   "고정시간_대비_가열_절감_분": 3.2,
+   "고정시간_대비_가열_절감_분": 2.9000000000000004,
    "세척코스": "강력(불림 포함)",
    "기본코스_대비_기대물_절감_L": 1.4,
    "사용자_터치_횟수": 0
@@ -248,6 +259,10 @@
    "final": 0.0795,
    "target": 0.08,
    "too_small": false,
+   "events": [],
+   "coasted_from": null,
+   "guard_notes": [],
+   "relights": 0,
    "overshot": false,
    "overshoot": 0.0005
   }
@@ -273,6 +288,12 @@
    "rewash_prob": 0.05,
    "noise_db": 54,
    "quiet_note": null,
+   "need_probs": {
+    "0": 0.0,
+    "1": 1.0,
+    "2": 0.0
+   },
+   "course_by_cut": "표준",
    "expected_water_l": 51.2,
    "baseline_course": "표준",
    "baseline_expected_water_l": 51.2,
