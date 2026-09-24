@@ -217,6 +217,7 @@ def build_tasks(constraints: dict) -> list:
         ctx["mass_g"] = out["total_mass_g"]
         ctx["extra_water_g"] = out["extra_water_g"]
         ctx["prep_missing"] = out["missing"]
+        ctx["prep_short"] = out.get("short_g") or None
 
     def _converge_setup(ctx):
         K.COOKER.start(ctx["mass_g"], ctx["extra_water_g"], power=3)
@@ -230,10 +231,22 @@ def build_tasks(constraints: dict) -> list:
                 "max_steps": 30}
 
     def _converge_absorb(ctx, out):
+        st = K.COOKER.state()
         K.COOKER.stop()
         ctx["cook_min"] = out["steps"]
         ctx["final_ratio"] = out["final"]
         ctx["soil"] = ctx["record"]["soil_score"]
+
+        # 끝난 조리를 다음 번 목표로 저장한다.
+        # 공개 레시피로 처음 만든 메뉴는 목표가 '조리법 기본값(가정)' 이었다.
+        # 이제 그 자리를 이번에 실제로 잰 값이 대신한다 — 두 번째부터 달라진다.
+        saved = K.record_save(
+            ctx["record"],
+            {"final_ratio": out["final"], "cook_min": out["steps"],
+             "peak_temp_c": st["temp_c"], "soil_score": ctx["record"]["soil_score"]},
+            saved_by="본인", satisfaction=4)
+        ctx["saved_record_id"] = saved["record_id"]
+        ctx["target_was_estimated"] = bool(ctx["record"].get("estimated"))
 
     def _aftercare_bind(ctx):
         return {"soil_score": ctx["soil"], "profile": "dishwasher"}
@@ -300,6 +313,13 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                 break
 
         metrics = {}
+        if ctx.get("saved_record_id"):
+            metrics["저장된 기록"] = ctx["saved_record_id"]
+            if ctx.get("target_was_estimated"):
+                metrics["목표 갱신"] = (f"가정 {ctx['record']['target_mass_ratio']} → "
+                                    f"실측 {ctx['final_ratio']}")
+        if ctx.get("prep_short"):
+            metrics["재고 부족"] = ctx["prep_short"]
         if "cook_min" in ctx:
             rec_min = ctx["record"].get("cook_minutes_observed")
             metrics["가열 시간(분)"] = ctx["cook_min"]
@@ -309,8 +329,6 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                 # 공개 레시피에는 실측 조리 시간이 없다. 없는 값을 지어내지 않는다.
                 metrics["기록 고정시간 대비(분)"] = "해당 없음(첫 조리·실측 기록 없음)"
             metrics["최종 질량비"] = ctx["final_ratio"]
-            if ctx["record"].get("estimated"):
-                metrics["목표 출처"] = "조리법 기본값(가정) — 이번 실측으로 대체 예정"
         if "course" in ctx:
             metrics["세척 코스"] = ctx["course"]
             metrics["기대 물 사용(L)"] = ctx["water_expected_l"]
@@ -324,6 +342,11 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["확인 요청"] = [c["name"] + " — " + c["reason"]
                                  for c in ctx["need_confirm"]]
         metrics["메뉴"] = ctx.get("menu_name", "-")
+        if ctx.get("record"):
+            metrics["사용한 기록"] = ctx["record"].get("record_id")
+            metrics["목표 질량비"] = ctx["record"].get("target_mass_ratio")
+            metrics["목표 출처"] = ("조리법 기본값(가정)" if ctx["record"].get("estimated")
+                                else "실측 기록")
 
         return {"ok": ok, "user_touches": ctx["touches"],
                 "metrics": metrics, "log": log, "ctx": ctx}

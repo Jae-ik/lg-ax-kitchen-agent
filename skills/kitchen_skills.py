@@ -110,6 +110,7 @@ class PrepSkill(Skill):
 
     def run(self, record: dict, weigh, available, **_) -> SkillResult:
         total, extra, ev, missing = 0.0, 0.0, [], []
+        short = {}
         for ing in record.get("ingredients", []):
             if not available(ing["name"]):
                 missing.append(ing["name"])
@@ -122,19 +123,26 @@ class PrepSkill(Skill):
                 continue
             total += w["actual_g"]
             extra += w["expected_extra_water_g"]
+            if w.get("short_g"):
+                short[ing["name"]] = w["short_g"]
             ev.append(f"{ing['name']} 목표 {w['target_g']}g → 실계량 {w['actual_g']}g"
                       + (f", 추가 수분 {w['expected_extra_water_g']}g 예상"
-                         if w["expected_extra_water_g"] else ""))
+                         if w["expected_extra_water_g"] else "")
+                      + (f"  ⚠ {w['short_g']}g 모자람" if w.get("short_g") else ""))
 
         # 기록에 없는 나머지(국물 등)는 기록된 초기 질량으로 맞춘다
         listed = sum(i["qty_g"] for i in record.get("ingredients", []))
         total += record.get("initial_mass_g", 0) - listed
         ev.append(f"총 {round(total)}g (기록 {record.get('initial_mass_g')}g), "
                   f"추가 수분 합 {round(extra, 1)}g")
+        if short:
+            ev.append("재고가 모자라 목표보다 적게 담은 재료: "
+                      + ", ".join(f"{k} {v}g" for k, v in short.items())
+                      + " — 조리 목표를 그만큼 낮춰 잡아야 한다")
         return SkillResult(not missing,
                            {"total_mass_g": round(total, 1),
                             "extra_water_g": round(extra, 1),
-                            "missing": missing}, ev)
+                            "missing": missing, "short_g": short}, ev)
 
 
 class ProcureSkill(Skill):

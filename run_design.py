@@ -69,7 +69,8 @@ def build_design_tasks(ctx_seed: dict) -> list:
     ]
 
 
-def design_for(pid: str, trace: Trace, seed: int = 7) -> dict:
+def design_for(pid: str, trace: Trace, seed: int = 7,
+               keep_records: bool = False) -> dict:
     p = personas.get(pid)
     banner(f"고객 상황 · {p['label']}  ({pid})")
 
@@ -77,7 +78,8 @@ def design_for(pid: str, trace: Trace, seed: int = 7) -> dict:
     # 상비품(소금·후춧가루 등)은 가구와 무관하게 늘 있다고 본다.
     # seed 를 바꿔 같은 상황을 여러 번 돌리면 흔들림의 크기를 잴 수 있다.
     low = p.get("pantry_low")
-    K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed)
+    K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed,
+            keep_records=keep_records)
 
     trace.stage("GOAL", f"{p['label']}의 수고를 줄이는 UX 시나리오를 만들고 "
                         f"실행으로 검증한다",
@@ -121,7 +123,10 @@ def design_for(pid: str, trace: Trace, seed: int = 7) -> dict:
         print(f"          가전: {b['system']}")
         print(f"          사라진 수고: {b['removes']}")
     return {"persona": pid, "label": p["label"], "scenario": sc,
-            "flow": ctx["flow"], "verify": v}
+            "flow": ctx["flow"], "verify": v,
+            "chosen": v["metrics"].get("사용한 기록"),
+            "target": v["metrics"].get("목표 질량비"),
+            "estimated": v["metrics"].get("목표 출처", "").startswith("조리법")}
 
 
 def main():

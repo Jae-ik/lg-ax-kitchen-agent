@@ -193,6 +193,56 @@
     "p95": 5,
     "unique": 1
    }
+  },
+  "p4_퇴근길": {
+   "계획 순서": {
+    "unique": 1,
+    "values": {
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 10
+    }
+   },
+   "선택 메뉴": {
+    "unique": 1,
+    "values": {
+     "된장찌개": 10
+    }
+   },
+   "세척 코스": {
+    "unique": 1,
+    "values": {
+     "강력(불림 포함)": 10
+    }
+   },
+   "touches": {
+    "n": 10,
+    "median": 0.0,
+    "min": 0,
+    "max": 0,
+    "sd": 0.0,
+    "p05": 0,
+    "p95": 0,
+    "unique": 1
+   },
+   "beats": {
+    "n": 10,
+    "median": 1.0,
+    "min": 1.0,
+    "max": 1.0,
+    "sd": 0.0,
+    "p05": 1.0,
+    "p95": 1.0,
+    "unique": 1
+   },
+   "cook_min": {
+    "n": 10,
+    "median": 8.0,
+    "min": 8,
+    "max": 8,
+    "sd": 0.0,
+    "p05": 8,
+    "p95": 8,
+    "unique": 1
+   }
   }
  }
 }

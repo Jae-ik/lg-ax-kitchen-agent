@@ -77,9 +77,10 @@ _FRIDGE = [
 
 
 _FRIDGE_DEFAULT = [dict(x) for x in _FRIDGE]
+_RECORDS_DEFAULT = {k: dict(v) for k, v in RECORDS.items()}
 
 
-def reset(fridge_items=None, seed: int = 7):
+def reset(fridge_items=None, seed: int = 7, keep_records: bool = False):
     """가구를 바꿔 가며 실행할 때 상태를 격리한다.
 
     모듈 전역 재고를 그대로 두고 여러 상황을 연달아 돌리면, 앞 실행에서
@@ -90,6 +91,11 @@ def reset(fridge_items=None, seed: int = 7):
     random.seed(seed)
     src = fridge_items if fridge_items is not None else _FRIDGE_DEFAULT
     _FRIDGE = [dict(x) for x in src]
+    # 조리하면 기록이 쌓인다. 상황을 바꿔 가며 비교할 때는 같은 출발점이어야
+    # 하므로 기록도 함께 되돌린다. (keep_records=True 면 이어서 쌓는다)
+    if not keep_records:
+        RECORDS.clear()
+        RECORDS.update({k: dict(v) for k, v in _RECORDS_DEFAULT.items()})
     COOKER.stop()
     COOKER.elapsed_min = 0.0
     COOKER.mass_g = 0.0
@@ -112,6 +118,21 @@ def fridge_add(name: str, qty_g: int, shelf_life_days: int = 5):
     return dict(_FRIDGE[-1])
 
 
+def fridge_consume(name: str, qty_g: float):
+    """쓴 만큼 재고에서 뺀다. 다 쓰면 목록에서 지운다.
+
+    이게 없으면 조리를 해도 냉장고가 그대로라, 다음 판단이 틀린 재고 위에서
+    이뤄진다.
+    """
+    for i, x in enumerate(_FRIDGE):
+        if x["name"] == name:
+            x["qty_g"] = max(0, x["qty_g"] - qty_g)
+            if x["qty_g"] <= 0:
+                _FRIDGE.pop(i)
+            return True
+    return False
+
+
 def fridge_list_items():
     """냉장고 재고를 반환한다."""
     return [dict(x) for x in _FRIDGE]
@@ -125,12 +146,21 @@ def fridge_check(name: str):
 
 
 # ══════════════════════════ 준비 (계량) ══════════════════════════
-def prep_weigh(name: str, target_g: int):
-    """계량한다. 실제 계량값은 목표와 조금 다르다(사람이 담기 때문)."""
+def prep_weigh(name: str, target_g: int, consume: bool = True):
+    """계량한다. 실제 계량값은 목표와 조금 다르다(사람이 담기 때문).
+
+    예전에는 재고가 모자라도 있는 만큼만 조용히 담고 끝냈다. 모자랐다는 사실이
+    아무 데도 남지 않아, 조리 단계가 잘못된 출발점을 정상으로 알았다.
+    이제 부족분을 함께 돌려주고, 담은 만큼 재고에서 뺀다.
+    """
     item = fridge_check(name)
     if item is None:
-        return {"ok": False, "reason": f"{name} 없음"}
-    actual = min(item["qty_g"], round(target_g * random.uniform(0.97, 1.03)))
+        return {"ok": False, "reason": f"{name} 없음", "short_g": target_g}
+    want = round(target_g * random.uniform(0.97, 1.03))
+    actual = min(item["qty_g"], want)
+    short = max(0, want - actual)
+    if consume:
+        fridge_consume(name, actual)
     # 수분이 많은 채소만 추가 수분이 나온다. 장류·건조 재료는 해당 없음.
     WATERY = {"배추", "애호박", "무", "양파", "버섯"}
     if name in WATERY:
@@ -139,7 +169,8 @@ def prep_weigh(name: str, target_g: int):
     else:
         extra_water = 0.0
     return {"ok": True, "name": name, "target_g": target_g,
-            "actual_g": actual, "expected_extra_water_g": extra_water}
+            "actual_g": actual, "short_g": short,
+            "expected_extra_water_g": extra_water}
 
 
 # ══════════════════════════ 조리기 ══════════════════════════
@@ -268,3 +299,36 @@ def record_progress(record_id: str):
             "remaining_g": round(remain_g, 1), "eta_min": eta,
             "temp_c": s["temp_c"], "power": s["power"],
             "reached": now <= target}
+
+
+# ══════════════════════════ 조리 기록 저장 ══════════════════════════
+def record_save(base: dict, measured: dict, saved_by: str = "본인",
+                satisfaction: int = 4) -> dict:
+    """끝난 조리를 다음 번 목표로 저장한다.
+
+    제안의 핵심이 "좋아했던 결과를 기록하고 다시 쓴다" 인데, 지금까지 저장하는
+    쪽이 없었다. 공개 레시피로 처음 만든 메뉴는 목표 질량비가 **가정값**이고,
+    한 번 만들고 나면 그 자리를 **이번에 실제로 잰 값**이 대신해야 한다.
+
+    base      이번에 쓴 기록 (개인 기록이거나 공개 레시피에서 변환된 것)
+    measured  {"final_ratio": .., "cook_min": .., "soil_score": ..}
+    """
+    rid = f"rec_{len(RECORDS) + 1:03d}"
+    rec = {
+        "record_id": rid,
+        "menu": base.get("menu"),
+        "saved_by": saved_by,
+        "saved_at": "실행 시점",
+        "ingredients": [dict(i) for i in base.get("ingredients", [])],
+        "initial_mass_g": base.get("initial_mass_g"),
+        # 여기가 핵심 — 가정값이 아니라 이번에 잰 값이 다음 목표가 된다
+        "target_mass_ratio": measured.get("final_ratio", base.get("target_mass_ratio")),
+        "peak_temp_c": measured.get("peak_temp_c"),
+        "cook_minutes_observed": measured.get("cook_min"),
+        "soil_score": measured.get("soil_score", base.get("soil_score")),
+        "satisfaction": satisfaction,
+        "estimated": False,                 # 실측이다
+        "from_record": base.get("record_id"),
+    }
+    RECORDS[rid] = rec
+    return rec
