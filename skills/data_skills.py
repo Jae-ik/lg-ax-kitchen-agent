@@ -69,6 +69,10 @@ class RecipeSourceSkill(Skill):
 
         return SkillResult(bool(kept), {
             "recipe_pool": kept,
+            "recovery": (f"적재한 {len(pool)}건이 모두 걸러졌다 "
+                         f"(기피 {len(blocked)}건, 나트륨 초과 {len(over_na)}건) — "
+                         f"자료가 비었거나 조건이 너무 좁다"
+                         if not kept else None),
             "loaded": len(pool), "kept": len(kept),
             "blocked_allergy": blocked, "blocked_sodium": over_na,
             "source": data.get("source"), "key_used": data.get("key_used")}, ev)

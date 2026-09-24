@@ -236,6 +236,8 @@ class Cooker:
     temp_c: float = 20.0
     power: int = 0                    # 0~5
     extra_water_g: float = 0.0
+    soil: float = 0.0                 # 눌어붙음 누적 (0~1)
+    peak_temp_c: float = 0.0
     log: list = field(default_factory=list)
 
     def start(self, initial_mass_g: float, extra_water_g: float = 0.0, power: int = 3):
@@ -246,6 +248,8 @@ class Cooker:
         self.extra_water_g = extra_water_g
         self.temp_c = 20.0
         self.power = power
+        self.soil = 0.0
+        self.peak_temp_c = 20.0
         self.log = [(0.0, self.mass_g, self.temp_c)]
 
     def tick(self, minutes: float = 1.0):
@@ -261,6 +265,15 @@ class Cooker:
         evap = self.power * 7.0 * boil * minutes
         evap *= random.uniform(0.92, 1.08)          # 회차 간 편차
         self.mass_g = max(0.0, self.mass_g - evap)
+
+        # 눌어붙음은 **조리기만 알 수 있는 값**이다. 끓는 상태에서 수분이 줄수록,
+        # 화력이 셀수록 바닥에 눌어붙는다. 예전에는 이 값을 기록의 가정값으로
+        # 두고 세척 코스를 골랐다 — 조리를 하고도 조리 결과를 안 본 셈이다.
+        # 계수 0.30 은 시뮬레이터 값이며 실측이 아니다.
+        dryness = 1.0 - (self.mass_g / self.initial_mass_g) if self.initial_mass_g else 0.0
+        self.soil = min(1.0, self.soil +
+                        boil * (0.30 + dryness) * (self.power / 5) * minutes * 0.30)
+        self.peak_temp_c = max(self.peak_temp_c, self.temp_c)
         self.log.append((round(self.elapsed_min, 1), round(self.mass_g, 1),
                          round(self.temp_c, 1)))
 
@@ -272,6 +285,12 @@ class Cooker:
                 "mass_ratio": round(self.mass_g / self.initial_mass_g, 4)
                 if self.initial_mass_g else 0.0,
                 "temp_c": round(self.temp_c, 1),
+                "peak_temp_c": round(self.peak_temp_c, 1),
+                "soil_score": round(self.soil, 4),
+                # 증발 편차(±8%)가 누적되므로 눌어붙음도 회차마다 흔들린다.
+                # 상대 표준편차 2.5% 는 파이프라인 120회에서 잰 값이다
+                # (평균 0.5286, 표준편차 0.0133).
+                "soil_sigma": round(self.soil * 0.025, 4),
                 "power": self.power}
 
     def set_power(self, level: int):

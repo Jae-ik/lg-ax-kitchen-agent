@@ -256,14 +256,21 @@ def build_tasks(constraints: dict) -> list:
         K.COOKER.stop()
         ctx["cook_min"] = out["steps"]
         ctx["final_ratio"] = out["final"]
-        ctx["soil"] = ctx["record"]["soil_score"]
+
+        # 눌어붙음은 **이번 조리에서 잰 값**을 쓴다. 예전에는 기록에 적힌
+        # 가정값을 그대로 세척기에 넘겼는데, 그러면 "조리기가 아는 것을
+        # 세척기에 넘긴다" 는 주장의 근거가 되지 못한다 — 조리를 하고도
+        # 조리 결과를 안 본 것이기 때문이다.
+        ctx["soil"] = st["soil_score"]
+        ctx["soil_sigma"] = st.get("soil_sigma", 0.0)
+        ctx["soil_assumed"] = ctx["record"].get("soil_score")
 
         # 끝난 조리를 다음 번 목표로 저장한다.
         # 다만 목표를 지나친 결과를 그대로 저장하면 오차가 학습된다.
         # 저장 전에 검토하고, 벗어났으면 사용자에게 물어야 한다.
         measured = {"final_ratio": out["final"], "cook_min": out["steps"],
-                    "peak_temp_c": st["temp_c"],
-                    "soil_score": ctx["record"]["soil_score"]}
+                    "peak_temp_c": st["peak_temp_c"],
+                    "soil_score": st["soil_score"]}
         review = K.record_review(ctx["record"], measured)
         ctx["save_review"] = review
 
@@ -283,10 +290,16 @@ def build_tasks(constraints: dict) -> list:
         ctx["target_was_estimated"] = bool(ctx["record"].get("estimated"))
 
     def _aftercare_bind(ctx):
-        return {"soil_score": ctx["soil"], "profile": "dishwasher"}
+        return {"soil_score": ctx["soil"], "profile": "dishwasher",
+                "soil_sigma": ctx.get("soil_sigma", 0.0),
+                "start_at": constraints.get("cleanup_at"),
+                "quiet_after": constraints.get("quiet_after")}
 
     def _aftercare_absorb(ctx, out):
         ctx["course"] = out["course"]
+        ctx["quiet_note"] = out.get("quiet_note")
+        ctx["border_note"] = out.get("border_note")
+        ctx["course_min"] = out["minutes"]
         ctx["water_expected_l"] = out["expected_water_l"]
         ctx["water_saved_l"] = out["saved_l"]
 
@@ -344,6 +357,15 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             if not res.ok and t.skill != "procure":
                 # procure 의 확인 요청은 실패가 아니라 설계된 정지다
                 ok = False
+                # 어디서 왜 멈췄는지 남기지 않으면 결과가 조용히 비어 있다.
+                # 전에는 실패한 실행도 성공한 실행과 똑같이 '지표 없음' 으로
+                # 보였고, 그래서 조리가 통째로 빠진 것을 놓쳤다.
+                ctx["halted_at"] = t.skill
+                ctx["halt_reason"] = (res.output.get("recovery")
+                                      or (res.evidence[-1] if res.evidence
+                                          else "사유 없음"))
+                if t.skill == "converge":
+                    K.COOKER.stop()
                 break
 
         metrics = {}
@@ -356,6 +378,16 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             if ctx.get("target_was_estimated"):
                 metrics["목표 갱신"] = (f"가정 {ctx['record']['target_mass_ratio']} → "
                                     f"실측 {ctx['final_ratio']}")
+        if ctx.get("halted_at"):
+            metrics["중단"] = f"{ctx['halted_at']} 에서 멈춤 — {ctx['halt_reason']}"
+        if ctx.get("border_note"):
+            metrics["경계 판정"] = ctx["border_note"]
+        if ctx.get("quiet_note"):
+            metrics["소음 조치"] = ctx["quiet_note"]
+        if ctx.get("soil") is not None:
+            a = ctx.get("soil_assumed")
+            metrics["눌어붙음(실측)"] = (f"{ctx['soil']:.3f}"
+                                   + (f" (기록 가정값 {a})" if a is not None else ""))
         if ctx.get("prep_short"):
             metrics["재고 부족"] = ctx["prep_short"]
         if ctx.get("too_small"):

@@ -110,7 +110,15 @@ class MenuSkill(Skill):
                 ev.append("  수량 부족(이름은 있으나 모자람): "
                           + ", ".join(f"{k} {v}g" for k, v in short.items()))
         out.sort(key=lambda x: -x["score"])
+        # 실패했을 때 "마지막 로그 줄" 이 사유로 읽히면 장황하고 부정확하다.
+        # 왜 후보가 하나도 안 남았는지를 스킬이 직접 요약한다.
+        recovery = None
+        if not out:
+            recovery = (f"실행 가능한 후보가 없다 — 검토한 {len(records)}건 중 "
+                        f"{len(dropped)}건이 제외됐다"
+                        + (" (기피 재료 또는 재고 부족)" if dropped else ""))
         return SkillResult(bool(out), {"candidates": out, "dropped": dropped,
+                                       "recovery": recovery,
                                        "best": out[0] if out else None}, ev)
 
 
@@ -172,6 +180,10 @@ class PrepSkill(Skill):
         return SkillResult(not missing,
                            {"total_mass_g": round(total, 1),
                             "extra_water_g": round(extra, 1),
+                            "recovery": (f"계량하지 못한 재료 {len(missing)}건: "
+                                         f"{', '.join(missing)} — 조달이 끝나지 "
+                                         f"않았거나 재고가 목표의 절반에 못 미친다"
+                                         if missing else None),
                             "missing": missing, "short_g": short}, ev)
 
 

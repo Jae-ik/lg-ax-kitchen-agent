@@ -83,7 +83,15 @@ class SituationReadSkill(Skill):
         quiet = persona.get("dislike_noise_after")
         if quiet:
             constraints["quiet_after"] = quiet
-            ev.append(f"{quiet} 이후 소음 회피 → 세척 시작 시각 제약")
+            ev.append(f"{quiet} 이후 소음 회피 → 세척 코스가 그 시각을 넘겨 돌면 "
+                      f"저소음으로 전환한다")
+        # 세척을 언제 시작하는지는 실행 층이 알아야 소음 판단을 할 수 있다.
+        # 시나리오 문장에만 적어 두면 문장과 동작이 어긋난다.
+        home = persona.get("arrive_home")
+        if home:
+            h, m = map(int, home.split(":"))
+            t = h * 60 + m + 45                 # 식사까지 마친 뒤 세척 시작
+            constraints["cleanup_at"] = f"{(t // 60) % 24:02d}:{t % 60:02d}"
 
         # 수고 지점: 고객이 말한 것 + 상황에서 읽히는 것
         for f in persona.get("friction_reported", []):
@@ -174,8 +182,9 @@ class ScenarioDraftSkill(Skill):
             quiet = constraints.get("quiet_after")
             beats.append({
                 "at": self._plus(t0, 45), "user": "코스를 고르지 않는다",
-                "system": "조리기가 넘긴 눌어붙음 정도로 코스를 정하고"
-                          + (f" {quiet} 전에 시작한다" if quiet else " 바로 시작한다"),
+                "system": "조리기가 잰 눌어붙음 정도로 코스를 정하고"
+                          + (f", {quiet} 이후까지 돌면 저소음으로 바꾼다"
+                             if quiet else " 바로 시작한다"),
                 "removes": "먹고 나서 설거지를 미루는 일 / 세척기를 언제 돌릴지 정하는 일",
                 "verified_by": "aftercare"})
 

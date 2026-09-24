@@ -221,6 +221,61 @@ def t19():
             f"지나침 {r.output.get('overshoot')}) ok={r.ok}")
 
 
+@case("세척이 소음 시각을 넘겨 도는 경우")
+def t20():
+    r = REGISTRY.get("aftercare").run(soil_score=0.7, profile="dishwasher",
+                                      start_at="22:25", quiet_after="22:30")
+    o = r.output
+    return f"{o['course']} {o['minutes']}분 {o['noise_db']}dB — {o['quiet_note']}"
+
+
+@case("소음 시각 안에 끝나면 손대지 않는가")
+def t21():
+    r = REGISTRY.get("aftercare").run(soil_score=0.7, profile="dishwasher",
+                                      start_at="18:00", quiet_after="23:00")
+    o = r.output
+    return f"{o['course']} {o['minutes']}분 {o['noise_db']}dB — 조치={o['quiet_note']}"
+
+
+@case("자정을 넘는 소음 시각")
+def t22():
+    r = REGISTRY.get("aftercare").run(soil_score=0.2, profile="dishwasher",
+                                      start_at="23:40", quiet_after="00:30")
+    o = r.output
+    return f"{o['course']} {o['minutes']}분 — {o['quiet_note']}"
+
+
+@case("눌어붙음을 실측하면 코스가 달라지는가")
+def t23():
+    K.reset()
+    out = []
+    for g, tgt in ((620, 0.78), (240, 0.88)):
+        K.COOKER.start(g, 0, power=3)
+        while K.COOKER.state()["mass_ratio"] > tgt and K.COOKER.elapsed_min < 40:
+            K.COOKER.tick(1.0)
+            if K.COOKER.state()["temp_c"] < 92:
+                K.COOKER.set_power(min(5, K.COOKER.power + 1))
+        soil = K.COOKER.state()["soil_score"]
+        K.COOKER.stop()
+        c = REGISTRY.get("aftercare").run(soil_score=soil).output["course"]
+        out.append(f"{g}g→{tgt}: 눌어붙음 {soil:.3f} → {c}")
+    return " / ".join(out)
+
+
+@case("수렴에 실패하면 가열을 끄는가")
+def t24():
+    K.reset()
+    K.COOKER.start(500, 0, power=1)
+    r = REGISTRY.get("converge").run(
+        observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
+        step=K.COOKER.tick, metric="mass_ratio", target=0.10,
+        direction="down", ready_key="temp_c", ready_at=92.0, max_steps=12)
+    power_after = K.COOKER.power
+    K.COOKER.stop()
+    return (f"ok={r.ok} 진행 {r.output['progress_pct']}% "
+            f"화력={power_after}(0이어야 함) 복구안={r.output['recovery'][:46]}")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("t") and callable(v) and hasattr(v, "_name")]
