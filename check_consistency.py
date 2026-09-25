@@ -155,6 +155,41 @@ def c6():
     return "\n".join(bad)
 
 
+@check("스킬 사이를 잇는 ctx 키가 모두 맞물리는가")
+def c7():
+    """ctx 는 스킬과 스킬을 잇는 유일한 통로다.
+
+    쓰기만 하고 아무도 읽지 않는 키는 **계산해 놓고 버리는 것**이고,
+    읽는데 아무도 쓰지 않는 키는 **끊긴 연결**이다. 둘 다 조용히 지나간다 —
+    전자는 값이 사라지고 후자는 None 이 되어 기본값으로 흐른다.
+    실제로 '기록 출처'(내 기록 vs 공개 레시피)가 계산만 되고 버려지고 있었다.
+    """
+    QUOTE = "[\"']"
+    W_PAT = re.compile(r"ctx\[" + QUOTE + r"([^\"']+)" + QUOTE + r"\]\s*=")
+    SD_PAT = re.compile(r"ctx\.setdefault\(" + QUOTE + r"([^\"']+)" + QUOTE)
+    RD_PAT = re.compile(r"ctx\[" + QUOTE + r"([^\"']+)" + QUOTE + r"\]")
+    GET_PAT = re.compile(r"ctx\.get\(" + QUOTE + r"([^\"']+)" + QUOTE)
+    ASSIGN = re.compile(r"ctx\[" + QUOTE + r"[^\"']+" + QUOTE + r"\]\s*=(?!=)")
+
+    src = io.open("kitchen_domain.py", encoding="utf-8").read().splitlines()
+    W, R = set(), set()
+    for ln in src:
+        W |= set(W_PAT.findall(ln))
+        W |= set(SD_PAT.findall(ln))
+        R |= set(RD_PAT.findall(ASSIGN.sub("", ln)))   # 대입 좌변은 빼고 센다
+        R |= set(GET_PAT.findall(ln))
+
+    seeded = {"pantry_refill", "time_budget_min", "touches"}
+    bad = []
+    orphan = sorted(k for k in W if k not in R)
+    if orphan:
+        bad.append(f"쓰기만 하고 읽지 않는 키: {orphan}")
+    dangling = sorted(k for k in R if k not in W and k not in seeded)
+    if dangling:
+        bad.append(f"읽는데 아무도 쓰지 않는 키: {dangling}")
+    return "\n".join(bad)
+
+
 def main():
     print("=" * 78)
     print("일관성 검사 — 기계가 확인할 수 있는 것만")

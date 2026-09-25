@@ -300,6 +300,10 @@ class ProcureSkill(Skill):
         known = set(known_items or [])
         avoid = set(avoid or [])
         auto, ask, ev = [], [], []
+        # 기한이 없으면 **2일 배송도 통과한다.** 조용히 그렇게 되지 않도록
+        # 로그에 남긴다 — 호출자가 기한을 안 넘긴 것이 의도인지 보이게.
+        if deadline_min is None:
+            ev.append("도착 기한이 주어지지 않았다 — 배송 시간을 따지지 않는다")
 
         for name in missing:
             offers = lookup(name)

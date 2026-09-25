@@ -20,7 +20,7 @@ python run_repeat.py            # 같은 상황 두 번 — 기록이 다음 목
 python run_share.py             # 본가 기록을 자취방·원룸 기기로 이식
 python stress_test.py           # 일부러 망가뜨린 입력 19건
 python check_regression.py      # scenarios.json 회귀 검사
-python check_consistency.py     # 선언·물리·문서 수치의 일관성 검사
+python check_consistency.py     # 선언·물리·문서 수치·스킬 맞물림 검사
 ```
 
 API 키가 없어도 전부 동작한다. 계획은 LLM이 아니라 **전제조건 플래너**가 계산한다.

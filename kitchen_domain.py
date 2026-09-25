@@ -604,7 +604,6 @@ def build_tasks(constraints: dict) -> list:
             # 시연에서는 사용자가 "그래도 저장" 을 골랐다고 본다.
             # 만족도를 낮춰 남기므로, 더 나은 기록이 생기면 그쪽이 먼저 뽑힌다.
             sat = 3
-            ctx["save_asked"] = review["why"]
         else:
             sat = 4
 
@@ -728,6 +727,18 @@ def make_executor(registry, on_step=None, seed_ctx=None):
         if ctx.get("doneness") is not None and ctx.get("held_for_doneness"):
             metrics["익힘"] = (f"졸임이 먼저 끝나 약불로 유지하며 익혔다 "
                             f"(익힘 {ctx['doneness']})")
+        # 제안의 핵심 구분인데 결과에 없었다 — 내 기록을 쓴 것인지
+        # 공개 레시피를 쓴 것인지는 "저장한 것이 다시 쓰인다" 의 증거다.
+        if ctx.get("approved_after_ask"):
+            metrics["확인 후 승인"] = ctx["approved_after_ask"]
+        if ctx.get("overshoot") is not None:
+            metrics["목표와의 차이"] = ctx["overshoot"]
+        if ctx.get("menu_from"):
+            metrics["기록 출처"] = ctx["menu_from"]
+        if ctx.get("days_left") is not None and ctx["days_left"] < 99:
+            metrics["가장 급한 재료"] = f"{ctx['days_left']}일 남음"
+        if ctx.get("prep_missing"):
+            metrics["계량 실패"] = ctx["prep_missing"]
         if ctx.get("recipe_stats"):
             st_ = ctx["recipe_stats"]
             metrics["자료 선별"] = (
@@ -759,7 +770,7 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["냄비 앞에 있어야 하는 시간"] = (
                 f"{attended}분 / 조리 {cookm}분"
                 + (f" (에이전트가 없으면 {cookm}분 내내)" if cookm else ""))
-            ctx["attended_min"] = attended
+            metrics["지켜보는 시간(분)"] = attended
         if ctx.get("water_added_g"):
             metrics["물 보충"] = (f"재료가 빨아들일 {ctx['water_added_g']}g 을 "
                               f"미리 더 부었다")
@@ -807,6 +818,8 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                     f"({ctx['rest_drop']}) — 저장은 먹기 직전 값으로 한다")
         if "course" in ctx:
             metrics["세척 코스"] = ctx["course"]
+            if ctx.get("course_min"):
+                metrics["세척 소요(분)"] = ctx["course_min"]
             metrics["기대 물 사용(L)"] = ctx["water_expected_l"]
             metrics["기본 코스 대비 절감(L)"] = ctx["water_saved_l"]
         if ctx.get("order_krw"):
