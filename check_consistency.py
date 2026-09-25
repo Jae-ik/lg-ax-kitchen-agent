@@ -190,6 +190,27 @@ def c7():
     return "\n".join(bad)
 
 
+@check("스킬이 적어 둔 requires/provides 가 Task 선언과 어긋나지 않는가")
+def c8():
+    """스킬 클래스의 선언은 **문서용**이다 — 플래너는 Task 만 본다.
+
+    문서용이라 깨져도 아무 일이 안 일어나고, 그래서 조용히 낡는다.
+    비워 둔 것(기기마다 달라지는 스킬)은 눈감고, **적어 놓고 틀린 것**만 잡는다.
+    """
+    from kitchen_domain import build_tasks
+    from skills import REGISTRY
+    bad = []
+    for t in build_tasks({}):
+        sk = REGISTRY.get(t.skill)
+        for attr in ("requires", "provides"):
+            declared = set(getattr(sk, attr, ()) or ())
+            actual = set(getattr(t, attr, ()) or ())
+            if declared and declared != actual:
+                bad.append(f"{t.skill}.{attr}: 스킬은 {sorted(declared)} 인데 "
+                           f"Task 는 {sorted(actual)}")
+    return "\n".join(bad)
+
+
 def main():
     print("=" * 78)
     print("일관성 검사 — 기계가 확인할 수 있는 것만")

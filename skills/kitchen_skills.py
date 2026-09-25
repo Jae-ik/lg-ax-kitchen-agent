@@ -62,7 +62,9 @@ class MenuSkill(Skill):
                    "이름을 푼다(두부/연두부). 무엇이 같은지는 도메인이 안다",
     }
     reusable_for = ["조리 기록", "세탁 코스 기록", "청소 루틴 기록"]
-    requires = ("urgent_items",)
+    # 공개 자료(recipe_source)를 나중에 붙이면서 Task 만 고치고 여기를
+    # 안 고쳐 두 선언이 어긋나 있었다. 문서용이라 깨져도 아무 일이 안 난다.
+    requires = ("urgent_items", "recipe_pool")
     provides = ("chosen_record", "missing_items")
 
     def run(self, records: list, stock: list, prefer_items: list | None = None,
