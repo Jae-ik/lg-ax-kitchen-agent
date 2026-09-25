@@ -235,6 +235,53 @@ def c9():
     return "\n".join(bad)
 
 
+@check("문서의 서술 주장이 실행 결과와 맞는가")
+def c10():
+    """수치만 맞다고 주장이 맞는 것은 아니다.
+
+    "냄비 앞을 지키는 시간이 조리 시간의 **4분의 1 안팎**" 이라고 적었는데
+    실제로는 24~55%(중앙 46%)였다. 4분의 1은 4인분 하나뿐이었다.
+    "처음 사는 품목 **두 건**" 도 틀렸다 — 하나는 배송 기한 초과였다.
+    숫자 하나하나는 맞는데 그것을 묶어 말한 문장이 틀린 경우다.
+    """
+    import json
+    import os
+    if not os.path.exists("scenarios.json"):
+        return "scenarios.json 없음"
+    rows = {r["persona"]: r for r in json.load(
+        open("scenarios.json", encoding="utf-8"))}
+    doc = io.open("README.md", encoding="utf-8").read()
+    bad = []
+
+    # 지켜보는 시간의 비율
+    rat = []
+    for r in rows.values():
+        m = r["verify"]["metrics"]
+        a, c = m.get("지켜보는 시간(분)"), m.get("가열 시간(분)")
+        if a and c:
+            rat.append(a / c)
+    if rat:
+        lo, hi = round(min(rat) * 100), round(max(rat) * 100)
+        flat = doc.replace(" ", "")
+        # 문서는 "24~55%" 로도 "24%~55%" 로도 쓸 수 있다. 둘 다 받는다.
+        if not any(f"{lo}~{hi}%" in flat or f"{lo}%~{hi}%" in flat
+                   for _ in (0,)):
+            bad.append(f"지켜보는 시간 비율이 실제 {lo}~{hi}% 인데 "
+                       f"문서에 그 범위가 없다")
+
+    # 확인 요청의 사유가 서로 다른데 한 가지로 뭉뚱그리지 않았는가
+    reasons = rows["p3_알레르기"]["verify"]["metrics"].get("확인 요청", [])
+    if len(reasons) >= 2 and "처음 사는 품목 2건" in doc:
+        bad.append("확인 요청 사유가 서로 다른데 문서는 '처음 사는 품목 2건' 이라 적었다")
+
+    # 기록 출처 구분이 문서와 맞는가
+    pub = [p for p, r in rows.items()
+           if r["verify"]["metrics"].get("기록 출처") == "공개 레시피"]
+    if len(pub) == 1 and "공개 레시피" not in doc:
+        bad.append("한 상황만 공개 레시피를 쓰는데 문서에 그 구분이 없다")
+    return "\n".join(bad)
+
+
 def main():
     print("=" * 78)
     print("일관성 검사 — 기계가 확인할 수 있는 것만")
