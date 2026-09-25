@@ -5,7 +5,8 @@
 그 과정을 설명하는가)에 직접 대응한다.
 
 여기서는 단계 진행을 결정적으로 구현했다(LLM 없이도 돌아간다).
-agent.py 는 같은 레지스트리를 LLM 이 스스로 골라 쓰게 한다(미검증 경로).
+agent.py 는 LLM 이 도구를 스스로 고르는 경로다. 다만 **레지스트리를
+쓰지 않고** kitchen 함수를 직접 감싼다 — 미검증이고 제출 경로가 아니다.
 """
 from __future__ import annotations
 import json

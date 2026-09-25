@@ -1,44 +1,44 @@
 {
- "n_converge": 300,
- "n_agent": 60,
+ "n_converge": 200,
+ "n_agent": 40,
  "converge": {
   "cooker_steps": {
-   "n": 300,
-   "median": 7.7,
-   "min": 7.45,
-   "max": 8.0,
-   "sd": 0.09974745889272349,
-   "p05": 7.55,
-   "p95": 7.85,
+   "n": 200,
+   "median": 7.6,
+   "min": 7.35,
+   "max": 7.9,
+   "sd": 0.10457981401781133,
+   "p05": 7.45,
+   "p95": 7.8,
    "unique": 11
   },
   "cooker_final": {
-   "n": 300,
-   "median": 0.77665,
-   "min": 0.7722,
-   "max": 0.78,
-   "sd": 0.0018111473036601855,
-   "p05": 0.7743,
-   "p95": 0.7797,
-   "unique": 67
+   "n": 200,
+   "median": 0.7814,
+   "min": 0.7775,
+   "max": 0.7851,
+   "sd": 0.0019034705146127237,
+   "p05": 0.7792,
+   "p95": 0.7849,
+   "unique": 64
   },
   "dryer_steps": {
-   "n": 300,
+   "n": 200,
    "median": 11.4,
    "min": 11.0,
-   "max": 11.8,
-   "sd": 0.1521238530496341,
+   "max": 11.75,
+   "sd": 0.15284878148025907,
    "p05": 11.1,
    "p95": 11.6,
    "unique": 16
   },
   "dryer_final": {
-   "n": 300,
+   "n": 200,
    "median": 0.0795,
    "min": 0.0789,
    "max": 0.08,
-   "sd": 0.00027455398173927253,
-   "p05": 0.0792,
+   "sd": 0.0002948181642979275,
+   "p05": 0.0791,
    "p95": 0.08,
    "unique": 12
   }
@@ -48,23 +48,23 @@
    "계획 순서": {
     "unique": 1,
     "values": {
-     "inventory → recipe_source → menu → prep → converge → aftercare": 60
+     "inventory → recipe_source → menu → prep → converge → aftercare": 40
     }
    },
    "선택 메뉴": {
     "unique": 1,
     "values": {
-     "된장찌개": 60
+     "된장찌개": 40
     }
    },
    "세척 코스": {
     "unique": 1,
     "values": {
-     "에코": 60
+     "에코": 40
     }
    },
    "touches": {
-    "n": 60,
+    "n": 40,
     "median": 0.0,
     "min": 0,
     "max": 0,
@@ -74,7 +74,7 @@
     "unique": 1
    },
    "beats": {
-    "n": 60,
+    "n": 40,
     "median": 1.0,
     "min": 1.0,
     "max": 1.0,
@@ -84,11 +84,11 @@
     "unique": 1
    },
    "cook_min": {
-    "n": 60,
+    "n": 40,
     "median": 5.5,
     "min": 5.5,
     "max": 5.6,
-    "sd": 0.04582575694955824,
+    "sd": 0.044651427748729225,
     "p05": 5.5,
     "p95": 5.6,
     "unique": 2
@@ -98,23 +98,23 @@
    "계획 순서": {
     "unique": 1,
     "values": {
-     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 60
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 40
     }
    },
    "선택 메뉴": {
     "unique": 1,
     "values": {
-     "된장찌개": 60
+     "된장찌개": 40
     }
    },
    "세척 코스": {
     "unique": 1,
     "values": {
-     "표준": 60
+     "표준": 40
     }
    },
    "touches": {
-    "n": 60,
+    "n": 40,
     "median": 0.0,
     "min": 0,
     "max": 0,
@@ -124,7 +124,7 @@
     "unique": 1
    },
    "beats": {
-    "n": 60,
+    "n": 40,
     "median": 1.0,
     "min": 1.0,
     "max": 1.0,
@@ -134,37 +134,37 @@
     "unique": 1
    },
    "cook_min": {
-    "n": 60,
+    "n": 40,
     "median": 7.75,
-    "min": 7.6,
+    "min": 7.65,
     "max": 7.95,
-    "sd": 0.07076467260497196,
+    "sd": 0.0688181480425039,
     "p05": 7.65,
     "p95": 7.85,
-    "unique": 7
+    "unique": 6
    }
   },
   "p3_알레르기": {
    "계획 순서": {
     "unique": 1,
     "values": {
-     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 60
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 40
     }
    },
    "선택 메뉴": {
     "unique": 1,
     "values": {
-     "호박잎 삼계탕": 60
+     "호박잎 삼계탕": 40
     }
    },
    "세척 코스": {
     "unique": 1,
     "values": {
-     "강력(불림 포함)": 60
+     "강력(불림 포함)": 40
     }
    },
    "touches": {
-    "n": 60,
+    "n": 40,
     "median": 2.0,
     "min": 2,
     "max": 2,
@@ -174,7 +174,7 @@
     "unique": 1
    },
    "beats": {
-    "n": 60,
+    "n": 40,
     "median": 1.0,
     "min": 1.0,
     "max": 1.0,
@@ -184,37 +184,37 @@
     "unique": 1
    },
    "cook_min": {
-    "n": 60,
+    "n": 40,
     "median": 21.25,
-    "min": 20.9,
+    "min": 20.95,
     "max": 21.55,
-    "sd": 0.13786819389869798,
+    "sd": 0.13415825542992144,
     "p05": 21.0,
     "p95": 21.45,
-    "unique": 12
+    "unique": 11
    }
   },
   "p4_퇴근길": {
    "계획 순서": {
     "unique": 1,
     "values": {
-     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 60
+     "inventory → recipe_source → menu → procure → prep → converge → aftercare": 40
     }
    },
    "선택 메뉴": {
     "unique": 1,
     "values": {
-     "된장찌개": 60
+     "된장찌개": 40
     }
    },
    "세척 코스": {
     "unique": 1,
     "values": {
-     "에코": 60
+     "에코": 40
     }
    },
    "touches": {
-    "n": 60,
+    "n": 40,
     "median": 0.0,
     "min": 0,
     "max": 0,
@@ -224,7 +224,7 @@
     "unique": 1
    },
    "beats": {
-    "n": 60,
+    "n": 40,
     "median": 1.0,
     "min": 1.0,
     "max": 1.0,
@@ -234,11 +234,11 @@
     "unique": 1
    },
    "cook_min": {
-    "n": 60,
+    "n": 40,
     "median": 5.5,
     "min": 5.5,
     "max": 5.6,
-    "sd": 0.04229525846816492,
+    "sd": 0.039999999999999855,
     "p05": 5.5,
     "p95": 5.6,
     "unique": 2

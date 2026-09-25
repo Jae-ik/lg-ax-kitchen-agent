@@ -79,7 +79,12 @@ def measure_converge(n: int) -> dict:
         r = conv.run(observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
                      step=K.COOKER.tick, metric="mass_ratio",
                      target=rec["target_mass_ratio"], direction="down",
-                     ready_key="temp_c", ready_at=92.0, max_steps=30)
+                     # 끓음 판정은 도메인과 같은 값을 써야 한다. 92 로 두면
+                     # 아직 안 끓는 상태를 '준비됨' 으로 보고 화력을 안 올린다.
+                     ready_key="temp_c", ready_at=99.5,
+                     max_steps=400, max_minutes=45,
+                     residual=lambda st: (K.COOKER.predict_residual_g()
+                                          / max(1.0, st["initial_mass_g"])))
         K.COOKER.stop()
         cook_steps.append(r.output["steps"]); cook_final.append(r.output["final"])
 

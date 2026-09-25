@@ -90,7 +90,7 @@ def main():
             break
         st = K.COOKER.state()
         if K.COOKER.power < 5:
-            if st["temp_c"] < 99.5 and p["progress_pct"] <= 0.1:
+            if st["temp_c"] < K.Cooker.BOIL_C - 0.5 and p["progress_pct"] <= 0.1:
                 K.COOKER.set_power(K.COOKER.power + 1)
                 print(f"    ↑ 아직 끓지 않아 화력을 {K.COOKER.power} 로 올림")
             elif p["eta_min"] and p["eta_min"] > 6:
@@ -102,12 +102,16 @@ def main():
 
     # ── 4) 세척 : 조리 이력을 넘긴다 ──
     print("\n── 4. 세척 " + "─" * (W - 11))
-    course = K.dishwasher_recommend_course(rec["soil_score"])
-    call(f"dishwasher_recommend_course({rec['soil_score']})", course)
+    # 눌어붙음은 **이번 조리에서 잰 값**을 넘긴다. 기록의 가정값을 넘기면
+    # "조리기가 아는 것을 세척기에 넘긴다" 의 근거가 되지 못한다 —
+    # 조리를 하고도 조리 결과를 안 본 것이기 때문이다.
+    soil = K.COOKER.state().get("soil_score", rec["soil_score"])
+    course = K.dishwasher_recommend_course(soil)
+    call(f"dishwasher_recommend_course({soil:.3f})", course)
     sched = K.dishwasher_schedule(course["course"], 30)
     call("dishwasher_schedule(...)", sched)
     say("에이전트",
-        f"조리 기록의 눌어붙음 점수 {rec['soil_score']} 를 식기세척기에 넘겨 "
+        f"이번 조리에서 잰 눌어붙음 {soil:.3f} 을 식기세척기에 넘겨 "
         f"'{course['course']}' 코스를 30분 뒤로 예약했습니다.\n"
         f"        이 값은 조리기만 갖고 있던 정보라, 넘기지 않으면 식기세척기는 "
         f"표준 코스를 골랐을 것입니다.")
