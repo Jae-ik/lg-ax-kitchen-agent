@@ -515,8 +515,9 @@ class AftercareSkill(Skill):
                                   f"{chosen[2]}→{minutes}분). 물 사용량은 그대로다")
                 ev.append(quiet_note)
             else:
-                ev.append(f"{quiet_after} 전에 끝난다 (시작 {start_at} + "
-                          f"{chosen[2]}분) — 소음 조치 불필요")
+                quiet_note = (f"{quiet_after} 전에 끝난다 (시작 {start_at} + "
+                              f"{chosen[2]}분) — 소음 조치 불필요")
+                ev.append(quiet_note)
 
         return SkillResult(True, {
             "course": chosen[1], "minutes": minutes, "temp_c": chosen[3],

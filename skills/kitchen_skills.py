@@ -208,10 +208,14 @@ class PrepSkill(Skill):
             extra += w["expected_extra_water_g"]
             if w.get("short_g"):
                 short[ing["name"]] = w["short_g"]
-            ev.append(f"{ing['name']} 목표 {w['target_g']}g → 실계량 {w['actual_g']}g"
+            att = w.get("attempted_g")
+            ev.append(f"{ing['name']} 목표 {w['target_g']}g"
+                      + (f" → 담으려던 {att}g" if att and att != w["actual_g"] else "")
+                      + f" → 실계량 {w['actual_g']}g"
                       + (f", 추가 수분 {w['expected_extra_water_g']}g 예상"
                          if w["expected_extra_water_g"] else "")
-                      + (f"  ⚠ {w['short_g']}g 모자람" if w.get("short_g") else ""))
+                      + (f"  ⚠ 재고가 {w['short_g']}g 모자라 덜 담았다"
+                         if w.get("short_g") else ""))
 
         # 재료가 빨아들일 물을 **미리 채운다.**
         #

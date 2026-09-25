@@ -233,6 +233,10 @@ def prep_weigh(name: str, target_g: int, consume: bool = True):
     else:
         extra_water = 0.0
     return {"ok": True, "name": name, "target_g": target_g,
+            # 사람이 담으면 목표와 조금 다르다. 그 '담으려던 양' 을 함께
+            # 돌려준다 — 없으면 "목표 80g → 실계량 80g, 1g 모자람" 처럼
+            # 모순으로 읽힌다(81g 을 담으려다 재고가 80g 이었던 것이다).
+            "attempted_g": want,
             "actual_g": actual, "short_g": short,
             "expected_extra_water_g": extra_water}
 
@@ -662,7 +666,8 @@ def record_progress(record_id: str):
     target = r["target_mass_ratio"]
     now = s["mass_ratio"]
     done_pct = (1 - now) / (1 - target) * 100 if target < 1 else 100.0
-    # 최근 1분 증발률로 잔여 시간 추정
+    # 마지막 두 관측 사이의 증발률로 잔여 시간을 추정한다.
+    # 관측 주기가 가변이므로 "1분" 이 아니라 실제 간격으로 나눈다.
     rate = 0.0
     if len(COOKER.log) >= 2:
         (t0, m0, _), (t1, m1, _) = COOKER.log[-2], COOKER.log[-1]

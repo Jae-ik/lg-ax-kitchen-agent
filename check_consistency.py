@@ -282,6 +282,34 @@ def c10():
     return "\n".join(bad)
 
 
+@check("README 의 구조·실행 설명이 실제 파일·상황 수와 맞는가")
+def c11():
+    """구조 설명은 파일이 늘어도 자동으로 바뀌지 않는다.
+
+    실제로 페르소나를 3종에서 4종으로 늘린 뒤에도 README 는 "고객 상황 3종"
+    이었고, 검사 스크립트 2개는 목록에 아예 없었다.
+    """
+    import os
+    import personas
+    doc = io.open("README.md", encoding="utf-8").read()
+    bad = []
+
+    n = len(personas.ids())
+    if f"고객 상황 {n}종" not in doc:
+        bad.append(f"페르소나가 {n}종인데 README 구조 설명이 다르다")
+    if f"고객 상황 {n}건" not in doc:
+        bad.append(f"페르소나가 {n}개인데 실행 설명이 다르다")
+
+    # 주요 스크립트가 구조 설명에 있는가
+    i = doc.find("## 구조")
+    block = doc[i:doc.find("##", i + 5)] if i >= 0 else ""
+    for f in ("run_design.py", "planner.py", "kitchen_domain.py", "store.py",
+              "check_regression.py", "check_consistency.py", "stress_test.py"):
+        if os.path.exists(f) and f not in block:
+            bad.append(f"{f} 가 구조 설명에 없다")
+    return "\n".join(bad)
+
+
 def main():
     print("=" * 78)
     print("일관성 검사 — 기계가 확인할 수 있는 것만")

@@ -13,14 +13,14 @@ Goal → Plan → Tool·Skill → Execute → Evaluate → Output
 ## 실행
 
 ```bash
-python run_design.py            # 고객 상황 3건 → 시나리오 3건 (주 산출물)
+python run_design.py            # 고객 상황 4건 → 시나리오 4건 (주 산출물)
 python run_design.py p1_야근    # 한 상황만
 python run_demo.py              # 실행 층만 단독 — 스킬 재사용 실증
 python run_repeat.py            # 같은 상황 두 번 — 기록이 다음 목표가 되는지
 python run_share.py             # 본가 기록을 자취방·원룸 기기로 이식
 python stress_test.py           # 일부러 망가뜨린 입력 19건
 python check_regression.py      # scenarios.json 회귀 검사
-python check_consistency.py     # 선언·물리·문서·맞물림·주장 10항목 검사
+python check_consistency.py     # 선언·물리·문서·맞물림·주장 11항목 검사
 ```
 
 API 키가 없어도 전부 동작한다. 계획은 LLM이 아니라 **전제조건 플래너**가 계산한다.
@@ -30,9 +30,10 @@ API 키가 없어도 전부 동작한다. 계획은 LLM이 아니라 **전제조
 ```
 run_design.py        설계 Agent — 6단계 루프
 planner.py           전제조건·효과 기반 플래너. 호출 순서를 적어두지 않고 계산한다
-personas.py          고객 상황 3종 (입력)
+personas.py          고객 상황 4종 (입력) — 가구원·시간·제약·조리기
 kitchen_domain.py    도메인 바인딩 — 여기만 바꾸면 세탁실·욕실이 된다
-store.py             장보기 서비스 어댑터 — 가격·배송시간 조회 (주문은 어댑터 자리만)
+store.py             장보기 어댑터 — 가격·배송시간·품절 조회. 주문까지 되는
+                     상점(제휴)만 자동 주문하고 나머지는 사용자에게 넘긴다
 skills/
   design_skills.py   설계 층 4  situation_read · scenario_draft · flow_design · experience_verify
   data_skills.py     실행 층 1  recipe_source  (자료 수집·선별)
@@ -42,6 +43,10 @@ skills/
 fetch_data.py        공개 자료 수집 (식약처 레시피 DB) → data/recipes.json
 recipe_parse.py      재료 문자열 파싱 (표기 두 종류 처리)
 kitchen.py / dryer.py  기기 시뮬레이터 (ThinQ Connect API 로 교체 가능)
+                     열 모델은 열량 수지 — 투입·방열·잠열로 계산한다
+check_regression.py  scenarios.json 이 기대값과 같은지 (실행 단계별 ok 까지)
+check_consistency.py 선언·물리·문서·맞물림·주장 11항목 검사
+stress_test.py       일부러 망가뜨린 입력 52건
 ```
 
 **설계 층은 실행 층을 import 하지 않는다.** 실행 함수를 주입받는다.
