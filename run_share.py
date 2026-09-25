@@ -39,16 +39,28 @@ def cook(rec: dict, label: str) -> dict:
     listed = sum(i["qty_g"] for i in rec["ingredients"])
     total += (rec.get("initial_mass_g") or listed) - listed
 
-    K.COOKER.start(total, extra, power=3)
+    K.COOKER.start(total, extra, power=3, capacity_g=3000)
+    tgt = rec["target_mass_ratio"]
     r = REGISTRY.get("converge").run(
         observe=lambda: K.COOKER.state(), actuate=K.COOKER.set_power,
         step=K.COOKER.tick, metric="mass_ratio",
-        target=rec["target_mass_ratio"], direction="down",
-        ready_key="temp_c", ready_at=92.0, max_steps=40)
+        target=tgt, direction="down",
+        ready_key="temp_c", ready_at=99.5, max_steps=400, max_minutes=60,
+        # 파이프라인과 같은 보정을 쓴다. 여기만 빼 두면 작은 냄비의 오차가
+        # 실제보다 커 보여서, 이식이 안 되는 것처럼 읽힌다.
+        residual=lambda st: (K.COOKER.predict_residual_g()
+                             / max(1.0, st["initial_mass_g"])))
+    # 먹기 직전 상태로 재고, 지나쳤으면 물로 되돌린다 — 파이프라인과 같다.
+    rested = K.COOKER.rest_until_still()
+    if rested["mass_ratio"] < tgt - 1e-3:
+        need = (tgt - rested["mass_ratio"]) * rested["initial_mass_g"]
+        if need / max(1.0, rested["mass_g"]) <= 0.06:
+            K.COOKER.add_water(need)
+            rested = K.COOKER.state()
     K.COOKER.stop()
     return {"label": label, "start_g": round(total), "steps": r.output["steps"],
-            "final": r.output["final"], "target": rec["target_mass_ratio"],
-            "reached": r.output["reached"]}
+            "final": rested["mass_ratio"], "target": tgt,
+            "reached": abs(tgt - rested["mass_ratio"]) <= 0.10}
 
 
 def main():

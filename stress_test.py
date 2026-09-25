@@ -625,6 +625,55 @@ def t47():
     return f"ok={r.ok} best={r.output['best']} 사유={r.output.get('recovery')}"
 
 
+# ═══════════════ 7. 장보기 어댑터의 극단 ═══════════════
+@case("주문까지 되는 상점이 없을 때 (조회만 가능)")
+def t48():
+    only_view = [store.Store("조회전용", delivery_min=30, catalog={"두부": 2800},
+                             can_order=False)]
+    r = REGISTRY.get("procure").run(missing=["두부"],
+                                    lookup=store.make_lookup(only_view),
+                                    known_items=["두부"], deadline_min=60)
+    return (f"자동 {len(r.output['auto_ordered'])} / "
+            f"사유 {[a['reason'] for a in r.output['need_confirm']]}")
+
+
+@case("품절이 조회에서 빠지는가")
+def t49():
+    s_ = store.Store("품절있음", delivery_min=30, catalog=store.BASE_PRICE,
+                     out_of_stock=("두부", "대파"), can_order=True)
+    lk = store.make_lookup([s_])
+    return (f"두부 {len(lk('두부'))}건 / 배추 {len(lk('배추'))}건 "
+            f"(품절은 0건이어야 한다)")
+
+
+@case("취급하지 않는 품목의 최속 배송")
+def t50():
+    return (f"찹쌀 {store.min_delivery_min(item='찹쌀')}분 / "
+            f"두부 {store.min_delivery_min(item='두부')}분 / "
+            f"품목 무시 {store.min_delivery_min()}분")
+
+
+@case("가격표에 없는 품목")
+def t51():
+    r = REGISTRY.get("procure").run(missing=["트러플"], lookup=store.make_lookup(),
+                                    known_items=["트러플"])
+    return f"확인요청 {[a['reason'] for a in r.output['need_confirm']]}"
+
+
+@case("같은 메뉴를 세 번 — 조리량이 부풀지 않는가")
+def t52():
+    K.reset()
+    rec = dict(K.RECORDS["rec_001"])
+    sizes = []
+    for _ in range(3):
+        scaled = K.record_scale(rec, 4, "본가 6인용 조리기")
+        sizes.append(scaled["initial_mass_g"])
+        saved = K.record_save(scaled, {"final_ratio": 0.78, "cook_min": 10},
+                              actual_initial_g=scaled["initial_mass_g"])
+        rec = saved
+    return f"{sizes} (같아야 한다 — 저장에 인분 수가 남아야)"
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("t") and callable(v) and hasattr(v, "_name")]

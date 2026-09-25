@@ -723,6 +723,11 @@ def record_save(base: dict, measured: dict, saved_by: str = "본인",
     rec = {
         "record_id": rid,
         "menu": base.get("menu"),
+        # **몇 인분을 만든 것인지** 남긴다. 예전에는 이 값이 빠져서,
+        # 4인분으로 만든 것이 1인분 기록으로 저장됐다. 다음 회차에 또 4배를
+        # 하니 조리량이 회차마다 부풀어 기기 용량에 걸렸다(2036g → 2550g,
+        # 조리 시간 21분 → 42분).
+        "servings": base.get("servings", 1),
         "saved_by": saved_by,
         "device": device,                   # 어느 기기에서 만들었나
         "saved_at": "실행 시점",

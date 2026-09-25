@@ -5,7 +5,7 @@
 그 과정을 설명하는가)에 직접 대응한다.
 
 여기서는 단계 진행을 결정적으로 구현했다(LLM 없이도 돌아간다).
-agent_llm.py 는 같은 레지스트리를 LLM 이 스스로 골라 쓰게 한다.
+agent.py 는 같은 레지스트리를 LLM 이 스스로 골라 쓰게 한다(미검증 경로).
 """
 from __future__ import annotations
 import json

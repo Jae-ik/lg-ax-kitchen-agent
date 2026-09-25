@@ -135,15 +135,15 @@
    "auto_ordered": [
     {
      "name": "두부",
-     "price_krw": 2660,
-     "store": "일반배송",
-     "delivery_min": 2880,
-     "source": "시뮬레이터"
+     "price_krw": 3080,
+     "store": "즉시배송",
+     "delivery_min": 20,
+     "source": "시뮬레이터(제휴 가정)"
     }
    ],
    "need_confirm": [],
-   "total_krw": 2660,
-   "arrive_in_min": 2880
+   "total_krw": 3080,
+   "arrive_in_min": 20
   }
  },
  {
@@ -255,9 +255,9 @@
   "text": "converge 실행",
   "data": {
    "reached": true,
-   "observations": 13,
-   "steps": 10.7,
-   "final": 0.0796,
+   "observations": 14,
+   "steps": 11.3,
+   "final": 0.0795,
    "target": 0.08,
    "too_small": false,
    "events": [],
@@ -265,7 +265,7 @@
    "guard_notes": [],
    "held": false,
    "overshot": false,
-   "overshoot": 0.0004
+   "overshoot": 0.0005
   }
  },
  {
@@ -308,7 +308,7 @@
  },
  {
   "stage": "OUTPUT",
-  "text": "건조 완료 — 10.7분에 함수율 0.0796 도달",
+  "text": "건조 완료 — 11.3분에 함수율 0.0795 도달",
   "data": {
    "세탁조코스": "표준",
    "기본코스_대비_기대물_절감_L": 0.0

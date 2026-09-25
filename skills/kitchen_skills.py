@@ -240,7 +240,10 @@ class PrepSkill(Skill):
             # 흡수량만 채웠다가 삼계탕이 0.9352 에서 국물이 바닥나 멈췄다.
             r = record.get("target_mass_ratio") or 1.0
             need_total = (solid_g + absorb_g) / max(0.05, r) * 1.05   # 5% 여유
-            water_added = round(max(absorb_g, need_total - total), 1)
+            # 흡수량은 need_total 에 **이미 포함**돼 있다. max(absorb_g, ...) 로
+            # 두면 기록에 물이 이미 들어 있어도 흡수량만큼 또 붓는다 —
+            # 두 번째 조리에서 2036g 이 3038g 이 되어 용량 상한에 걸렸다.
+            water_added = round(max(0.0, need_total - total), 1)
             total += water_added
             ev.append(f"재료가 물 {round(absorb_g)}g 을 빨아들인다. "
                       f"목표 {r} 까지 졸이려면 고형 {round(solid_g)}g + 흡수분을 "
@@ -281,6 +284,8 @@ class ProcureSkill(Skill):
         "missing": "list[str]",
         "lookup": "(품목) -> list[Offer]   상점 조회 함수. 주입받는다",
         "known_items": "list[str]  이전에 산 적 있는 품목",
+        # lookup 이 돌려주는 Offer 에 can_order 가 실려 온다. 주문까지 되는
+        # 상점이 없으면 값이 얼마든 자동 주문하지 않는다.
         "avoid": "list[str]  알레르기·기피 품목",
         "auto_limit_krw": "int  1회 자동 주문 상한",
         "deadline_min": "int | None  이 시간 안에 도착해야 한다",
@@ -316,7 +321,17 @@ class ProcureSkill(Skill):
                 ev.append(f"{name}: 제때 도착하는 상점 없음 "
                           f"(최속 {fastest.store} {fastest.delivery_min}분) → 확인 요청")
                 continue
-            best = min(fit, key=lambda o: o.price_krw)
+            # 주문까지 되는 상점만 자동 주문 대상이다. 공개 주문 API 가 없는
+            # 상점은 조회만 된다 — 제휴 여부를 모른 채 전부 주문하고 있었다.
+            orderable = [o for o in fit if getattr(o, "can_order", False)]
+            if not orderable:
+                ask.append({"name": name,
+                            "reason": "제때 오는 상점 중 주문까지 되는 곳이 없다"
+                                      " (조회만 가능)"})
+                ev.append(f"{name}: 제때 도착하는 {len(fit)}곳 모두 조회만 가능 "
+                          f"→ 사용자가 직접 주문해야 한다")
+                continue
+            best = min(orderable, key=lambda o: o.price_krw)
             ev.append(f"{name}: 상점 {len(offers)}곳 비교 → "
                       + " / ".join(f"{o.store} {o.price_krw:,}원 {o.delivery_min}분"
                                    for o in offers))
