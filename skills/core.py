@@ -20,19 +20,34 @@ class ConvergeSkill(Skill):
                    "계산해 액추에이터를 조정하며, 목표에 닿으면 즉시 멈춘다. "
                    "경과 시간이 아니라 상태로 종료를 판정한다.")
     input_schema = {
+        # ── 기기를 다루는 네 함수. 이 스킬은 기기를 모르고 함수만 받는다 ──
         "observe": "() -> dict            현재 상태를 읽는 함수",
         "actuate": "(int) -> None         액추에이터 세기를 바꾸는 함수",
         "step": "(float) -> None          시간을 진행시키는 함수",
         "metric": "str                    수렴을 판정할 상태 키",
+        # ── 목표와 판정 ──
         "target": "float                  목표값",
         "direction": "'down' | 'up'       목표에 접근하는 방향",
+        "tolerance": "float | None        이만큼 벗어나면 도달로 세지 않는다",
+        "also_require": "(state) -> bool  metric 말고 함께 만족해야 하는 조건. "
+                        "졸임이 끝나도 안 익었으면 끝이 아니다",
+        # ── 진행 제어 ──
         "power_key": "str                 현재 세기를 담은 상태 키",
-        "max_power": "int",
-        "max_steps": "int",
+        "max_power": "int                 기기 사양 상한",
+        "hold_power": "int                다른 조건을 기다릴 때 유지할 세기",
+        "max_steps": "int                 관측 횟수 상한(무한루프 방지)",
+        "max_minutes": "float | None      시간 상한. 이쪽이 실질 기준이다",
+        "min_interval": "float            관측 주기 하한",
         "ready_key": "str | None          준비 상태 키(예: 온도). 미달이면 세기를 올린다",
-        "ready_at": "float | None",
-        "min_controllable": "float | None  이보다 적으면 관측 주기 안에 지나친다",
-        "amount_key": "str                 양을 담은 상태 키",
+        "ready_at": "float | None         이 값에 닿아야 본격 진행으로 본다",
+        # ── 도메인이 주입하는 판단들 ──
+        "residual": "(state) -> float     지금 멈추면 얼마나 더 갈지. 이 값으로 미리 끈다",
+        "guard": "(state) -> dict | None  이상 감지. {'stop'} 또는 {'limit_power'}",
+        "recover": "(state, target, cur) -> dict | None  지나쳤을 때 되돌리는 수단",
+        "on_observe": "(state) -> dict | None  매 관측 뒤 도메인이 할 일"
+                      "(재료 투입·뚜껑·교반 등)",
+        "min_controllable": "float | None  이보다 적으면 맞출 수 없어 거부한다",
+        "amount_key": "str                제어 가능 최소량을 비교할 상태 키",
     }
     reusable_for = ["조리기(질량비)", "건조기(함수율)", "제습기(습도)", "에어컨(체감온도)"]
     # 진행이 가속할 수 있으므로 ETA 를 이만큼 보수적으로 본다.
@@ -368,11 +383,14 @@ class AftercareSkill(Skill):
     description = ("직전 작업에서 나온 오염도로 사후처리 코스를 고른다. 오염도는 작업을 "
                    "수행한 기기만 알고 있으므로, 넘겨주지 않으면 사후처리 기기는 기본 "
                    "코스를 쓰고 재세척 위험을 떠안는다.")
-    input_schema = {"soil_score": "float 0~1", "profile": "str  코스 프로파일 이름",
-                    "start_at": "str 'HH:MM'  시작 시각",
-                    "quiet_after": "str 'HH:MM'  이 시각 이후 소음을 피해야 한다",
-                    "soil_sigma": "float  오염도 측정의 표준편차. 주면 경계에서 "
-                                  "보수적으로 고른다"}
+    input_schema = {
+        "soil_score": "float 0~1          직전 작업이 잰 오염도",
+        "soil_sigma": "float              그 측정의 표준편차. 주면 임계 대신 "
+                      "확률가중 기대 비용으로 고른다",
+        "profile": "str                   코스 프로파일 이름(기기 종류)",
+        "start_at": "str 'HH:MM' | None   시작 시각",
+        "quiet_after": "str 'HH:MM' | None  이 시각 이후 소음을 피해야 한다",
+    }
     reusable_for = ["식기세척기(조리 후)", "세탁기(오염 의류)", "로봇청소기(바닥 오염)"]
 
     # (필요강도, 코스명, 분, 온도, 물L, 소음dB)  — 강도 0=약 1=보통 2=강
@@ -436,7 +454,13 @@ class AftercareSkill(Skill):
             soil_sigma: float = 0.0, **_) -> SkillResult:
         table = self.PROFILES.get(profile)
         if table is None:
-            return SkillResult(False, {"error": f"알 수 없는 프로파일 {profile}"}, [])
+            return SkillResult(False, {"error": f"알 수 없는 프로파일 {profile}",
+                                       "recovery": f"'{profile}' 코스표가 없다 — "
+                                                   f"기기 종류를 확인해야 한다"}, [])
+        # 오염도는 0~1 이다. 범위를 벗어난 값이 조용히 들어오면 코스가 엉뚱해진다.
+        if not (0.0 <= soil_score <= 1.0):
+            clipped = min(1.0, max(0.0, soil_score))
+            soil_score = clipped
         need = self._need(soil_score)
         by_strength = {t[0]: t for t in table}
         probs = self._need_probs(soil_score, soil_sigma)

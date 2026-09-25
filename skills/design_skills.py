@@ -146,7 +146,7 @@ class ScenarioDraftSkill(Skill):
             "at": t0, "user": "현관에 들어선다",
             "system": "재고와 남은 시간을 이미 읽고 오늘 할 수 있는 것을 정해 둔다",
             "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일",
-            "verified_by": "inventory"})
+            "verified_by": "inventory", "expect_metric": "메뉴"})
 
         if constraints.get("avoid"):
             beats.append({
@@ -154,7 +154,7 @@ class ScenarioDraftSkill(Skill):
                 "system": f"못 먹는 재료({', '.join(constraints['avoid'])})가 들어가는 "
                           f"후보를 미리 제외한다",
                 "removes": "재료마다 못 먹는 것이 섞였는지 확인하는 일",
-                "verified_by": "menu"})
+                "verified_by": "menu", "expect_metric": "메뉴"})
 
         if constraints.get("preorder"):
             lv = persona.get("leave_office", t0)
@@ -164,21 +164,28 @@ class ScenarioDraftSkill(Skill):
                           "귀가 시각에 맞춰 주문한다",
                 "removes": "퇴근길에 장을 보러 들르는 일 / 집에 와서 뭐가 없는지 "
                            "그제야 아는 일 / 양념이 떨어진 걸 조리 중에 발견하는 일",
-                "verified_by": "procure"})
+                "verified_by": "procure",
+                "expect_any": ["조달 대기", "확인 요청"]})
 
         if constraints.get("skip_procurement"):
             beats.append({
                 "at": self._plus(t0, 2), "user": "장을 보지 않는다",
                 "system": "시간이 모자라므로 지금 있는 재료만으로 가능한 것을 고른다",
                 "removes": "시간이 모자란 상태에서 메뉴를 정하는 일",
-                "verified_by": "menu"})
+                # 조달을 생략했다는 것은 '자동 주문' 이 결과에 없다는 뜻이다.
+                "verified_by": "menu", "expect_metric": "메뉴"})
         elif not constraints.get("preorder"):
             # 선제 주문이면 퇴근길 장면이 이미 조달을 덮는다 — 중복해서 넣지 않는다
             beats.append({
                 "at": self._plus(t0, 2), "user": "주문을 누르지 않는다",
-                "system": "부족분 중 이력이 있고 상한 이내인 것만 스스로 주문한다",
+                # 설계 시점에는 **자동 주문이 될지 확인이 필요할지 모른다.**
+                # "스스로 주문한다" 고만 적었다가, 둘 다 확인 요청이 된 상황에서
+                # 장면이 실제와 어긋났다. 판단 기준을 말하고 결과는 열어 둔다.
+                "system": "부족분을 이력·상한·안전 기준으로 판단해 "
+                          "되는 것은 주문하고, 안 되는 것만 묻는다",
                 "removes": "누가 장을 볼지 매번 정하는 일",
-                "verified_by": "procure"})
+                "verified_by": "procure",
+                "expect_any": ["조달 대기", "확인 요청"]})
 
         beats.append({
             # "불 앞을 지키지 않는다" 는 과장이었다. 재료를 넣고 뚜껑을
@@ -188,7 +195,7 @@ class ScenarioDraftSkill(Skill):
             "system": ("화력은 스스로 맞추고 목표 상태에 닿으면 멈춘다. "
                        "손이 필요한 때(재료 투입·뚜껑·젓기)만 알려 준다"),
             "removes": "조리 중 냄비 앞을 떠나지 못하는 일",
-            "verified_by": "converge"})
+            "verified_by": "converge", "expect_metric": "가열 시간(분)"})
 
         if constraints.get("finish_cleanup"):
             quiet = constraints.get("quiet_after")
@@ -198,7 +205,7 @@ class ScenarioDraftSkill(Skill):
                           + (f", {quiet} 이후까지 돌면 저소음으로 바꾼다"
                              if quiet else " 바로 시작한다"),
                 "removes": "먹고 나서 설거지를 미루는 일 / 세척기를 언제 돌릴지 정하는 일",
-                "verified_by": "aftercare"})
+                "verified_by": "aftercare", "expect_metric": "세척 코스"})
 
         # 장면은 시각 순으로 읽혀야 한다 — 퇴근이 귀가보다 앞이다
         beats.sort(key=lambda b: b["at"])
@@ -211,7 +218,16 @@ class ScenarioDraftSkill(Skill):
         covered = sum(1 for f in friction if any(f["what"] in r for r in removed))
         ev.append(f"수고 {len(friction)}건 중 {covered}건을 시나리오가 덮는다")
 
-        return SkillResult(True, {
+        # 덜어낼 수고가 없으면 시나리오를 만들 이유도 없다. 예전에는 이 경우에도
+        # 성공을 돌려줘서, **아무 불편도 없는 고객에게 설계가 성립했다**고 보고했다.
+        # 하나도 덮지 못한 경우도 마찬가지다 — 장면이 있어도 값이 없다.
+        ok = bool(friction) and covered > 0
+        if not friction:
+            ev.append("덜어낼 수고가 없다 — 설계할 것이 없으므로 성립으로 세지 않는다")
+        elif covered == 0:
+            ev.append("장면이 어떤 수고도 덜어내지 못한다 — 성립으로 세지 않는다")
+
+        return SkillResult(ok, {
             "scenario": {"persona": persona.get("label"), "beats": beats,
                          "covered": covered, "total_friction": len(friction)}}, ev)
 
@@ -265,6 +281,7 @@ class ExperienceVerifySkill(Skill):
         "plan": "Plan",
         "execute": "(plan) -> dict   실행 함수. 주입받는다",
         "touch_baseline": "int  에이전트가 없을 때 고객이 눌러야 하는 횟수",
+        "budget_min": "int | None  귀가 후 쓸 수 있는 시간. 초과하면 미달성으로 본다",
     }
     reusable_for = ["UX 시나리오 검증", "자동화 회귀 시험", "운전 정책 평가"]
     requires = ("flow", "scenario")
@@ -283,18 +300,31 @@ class ExperienceVerifySkill(Skill):
 
         # 장면마다 그것을 일으킨 스킬이 실제로 성공했는지 대조한다.
         # 시나리오는 그림이고 실행 로그는 사실이다. 둘이 어긋나면 설계가 틀린 것이다.
+        m = result.get("metrics", {})
         by_skill = {r["skill"]: r for r in result.get("log", [])}
         beats = scenario.get("beats", [])
         checked, unmet = [], []
         for b in beats:
             need = b.get("verified_by")
             row = by_skill.get(need)
+            # **스킬이 성공했다고 장면이 일어난 것은 아니다.** 실행은 됐는데
+            # 아무 결과도 안 낸 경우를 잡으려면, 그 장면이 만들어야 할
+            # 결과가 실제로 나왔는지 함께 봐야 한다.
+            want = b.get("expect_metric")
+            any_of = b.get("expect_any") or ([want] if want else [])
+            found = [k for k in any_of if k in m]
             if row is None:
                 hit, why = False, f"{need} 이 계획에 없다"
             elif not row["ok"]:
                 hit, why = False, f"{need} 실행 실패"
+            elif any_of and not found:
+                hit, why = False, (f"{need} 은 성공했지만 결과에 "
+                                   f"{' 또는 '.join(any_of)} 가 없다 — "
+                                   f"장면이 말한 일이 일어나지 않았다")
             else:
-                hit, why = True, f"{need} 실행 성공"
+                hit = True
+                why = (f"{need} 실행 성공, {found[0]}={m[found[0]]}" if found
+                       else f"{need} 실행 성공")
             checked.append({"at": b["at"], "removes": b["removes"],
                             "ok": hit, "why": why})
             if not hit:
@@ -303,7 +333,6 @@ class ExperienceVerifySkill(Skill):
 
         # 시간 예산은 제안의 핵심 주장이다. 장면이 다 달성돼도 25분 예산에
         # 40분이 걸렸으면 그 시나리오는 성립하지 않는다.
-        m = result.get("metrics", {})
         spent = m.get("식사까지(분)")
         over_budget = False
         if spent is not None and budget_min:

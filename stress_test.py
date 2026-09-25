@@ -549,6 +549,82 @@ def t38():
               "둘 다 3.75분으로 차이가 지워졌다")
 
 
+# ═══════════════ 6. 설계 층 스킬의 극단 ═══════════════
+@case("시간 예산이 0 인 상황")
+def t40():
+    import run_design
+    pr = {"id": "t", "label": "시험", "household_size": 1, "arrive_home": "20:00",
+          "time_budget_min": 0, "avoid": [], "friction_reported": []}
+    r = REGISTRY.get("situation_read").run(persona=pr,
+                                           stage_costs=run_design.STAGE_COSTS)
+    c = r.output["constraints"]
+    return (f"조달 생략={c.get('skip_procurement')} 세척포함={c.get('finish_cleanup')} "
+            f"예산={c.get('time_budget_min')}")
+
+
+@case("퇴근 시각은 있는데 이동 시간이 0")
+def t41():
+    import run_design
+    pr = {"id": "t", "label": "시험", "household_size": 1, "arrive_home": "19:00",
+          "leave_office": "18:00", "commute_min": 0, "time_budget_min": 30,
+          "avoid": [], "friction_reported": []}
+    r = REGISTRY.get("situation_read").run(persona=pr,
+                                           stage_costs=run_design.STAGE_COSTS)
+    c = r.output["constraints"]
+    return f"선제주문={c.get('preorder')} (이동 0분이면 미리 받을 수 없다)"
+
+
+@case("불편이 하나도 없는 고객")
+def t42():
+    import run_design
+    pr = {"id": "t", "label": "시험", "household_size": 1, "arrive_home": "19:00",
+          "time_budget_min": 60, "avoid": [], "friction_reported": []}
+    sr = REGISTRY.get("situation_read").run(persona=pr,
+                                            stage_costs=run_design.STAGE_COSTS)
+    r = REGISTRY.get("scenario_draft").run(
+        persona=pr, friction=sr.output["friction"],
+        constraints=sr.output["constraints"])
+    sc = r.output["scenario"]
+    return (f"장면 {len(sc['beats'])}개 · 덮은 수고 {sc['covered']}/"
+            f"{sc['total_friction']} · ok={r.ok} (덜어낼 것이 없으면 False 여야 한다)")
+
+
+@case("세척 코스 프로파일을 모르는 기기")
+def t43():
+    r = REGISTRY.get("aftercare").run(soil_score=0.5, profile="없는기기")
+    return f"ok={r.ok} {r.output}"
+
+
+@case("오염도가 범위를 벗어날 때 (-0.5 / 1.5)")
+def t44():
+    out = []
+    for v in (-0.5, 1.5):
+        r = REGISTRY.get("aftercare").run(soil_score=v)
+        out.append(f"{v} → {r.output['course']}")
+    return " / ".join(out)
+
+
+@case("자동 주문 상한이 0 원일 때")
+def t45():
+    r = REGISTRY.get("procure").run(missing=["두부"], lookup=store.make_lookup(),
+                                    known_items=["두부"], auto_limit_krw=0)
+    return (f"자동 {len(r.output['auto_ordered'])} / "
+            f"확인요청 {[a['reason'] for a in r.output['need_confirm']]}")
+
+
+@case("보관 수명이 0 일 때 (0 으로 나누기)")
+def t46():
+    r = REGISTRY.get("inventory").run(items=[
+        {"name": "무엇", "qty_g": 100, "stored_days": 3, "shelf_life_days": 0}])
+    return f"임박 {len(r.output['urgent'])} 폐기 {len(r.output['expired'])}"
+
+
+@case("기록이 하나도 없을 때 메뉴 고르기")
+def t47():
+    r = REGISTRY.get("menu").run(records=[], stock=[], resolve=resolve_stock)
+    return f"ok={r.ok} best={r.output['best']} 사유={r.output.get('recovery')}"
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("t") and callable(v) and hasattr(v, "_name")]

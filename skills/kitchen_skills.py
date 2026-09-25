@@ -52,10 +52,15 @@ class MenuSkill(Skill):
     name = "menu"
     description = ("재고와 저장된 조리 기록을 대조해 실행 가능한 후보를 만든다. "
                    "임박 재료를 쓰는 기록을 우선한다.")
-    input_schema = {"records": "list[dict]", "stock": "list[dict]",
-                    "prefer_items": "list[str]  우선 소진할 재료",
-                    "require_complete": "bool  재고만으로 가능한 후보로 제한",
-                    "avoid": "list[str]  들어가면 안 되는 재료"}
+    input_schema = {
+        "records": "list[dict]            저장 기록 + 공개 레시피를 같은 형태로",
+        "stock": "list[dict]              지금 있는 것 (이름과 수량)",
+        "prefer_items": "list[str]        우선 소진할 재료",
+        "require_complete": "bool         재고만으로 가능한 후보로 제한",
+        "avoid": "list[str]               들어가면 안 되는 재료",
+        "resolve": "(재료명, 재고) -> 재고명 | None   같은 것을 다르게 부르는 "
+                   "이름을 푼다(두부/연두부). 무엇이 같은지는 도메인이 안다",
+    }
     reusable_for = ["조리 기록", "세탁 코스 기록", "청소 루틴 기록"]
     requires = ("urgent_items",)
     provides = ("chosen_record", "missing_items")
@@ -128,9 +133,13 @@ class MenuSkill(Skill):
         # 왜 후보가 하나도 안 남았는지를 스킬이 직접 요약한다.
         recovery = None
         if not out:
-            recovery = (f"실행 가능한 후보가 없다 — 검토한 {len(records)}건 중 "
-                        f"{len(dropped)}건이 제외됐다"
-                        + (" (기피 재료 또는 재고 부족)" if dropped else ""))
+            if not records:
+                recovery = ("고를 후보 자체가 없다 — 저장 기록도 공개 레시피도 "
+                            "들어오지 않았다")
+            else:
+                recovery = (f"실행 가능한 후보가 없다 — 검토한 {len(records)}건 중 "
+                            f"{len(dropped)}건이 제외됐다"
+                            + (" (기피 재료 또는 재고 부족)" if dropped else ""))
         return SkillResult(bool(out), {"candidates": out, "dropped": dropped,
                                        "recovery": recovery,
                                        "best": out[0] if out else None}, ev)
@@ -141,9 +150,14 @@ class PrepSkill(Skill):
     description = ("조리 기록이 지정한 재료를 계량하고, 재료 상태에서 나올 추가 수분을 "
                    "미리 계산한다. 이 값을 넘겨주지 않으면 조리 단계는 같은 목표를 "
                    "다른 출발점에서 쫓게 된다.")
-    input_schema = {"record": "dict  조리 기록",
-                    "weigh": "(name, qty_g) -> dict   계량 함수. 주입받는다",
-                    "available": "(name) -> bool      재고 확인 함수. 주입받는다"}
+    input_schema = {
+        "record": "dict                   조리 기록",
+        "weigh": "(name, qty_g) -> dict   계량 함수. 주입받는다",
+        "available": "(name) -> bool      재고 확인 함수. 주입받는다",
+        "min_fill_ratio": "float          목표의 이 비율도 못 담으면 넘기지 않는다",
+        "absorb_of": "(재료들) -> float   빨아들일 물의 양. 그만큼 더 붓는다",
+        "solid_of": "(재료들) -> float    국물이 되지 않는 고형분",
+    }
     reusable_for = ["조리 전 계량", "세제 투입량 산정", "정수량 배분"]
     requires = ("stock_complete", "chosen_record")
     provides = ("measured",)

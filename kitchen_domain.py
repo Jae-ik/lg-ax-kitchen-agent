@@ -573,6 +573,9 @@ def build_tasks(constraints: dict) -> list:
             _fix = _make_recover(ctx)(rested, _tgt, rested["mass_ratio"])
             if _fix:
                 rested = K.COOKER.state()
+        pred = out.get("predicted_final")
+        if pred is not None:
+            ctx["residual_pred_err"] = round(abs(pred - rested["mass_ratio"]), 4)
         ctx["off_ratio"] = out["final"]                 # 불 끄는 순간
         ctx["final_ratio"] = rested["mass_ratio"]       # 먹기 직전 (저장 대상)
         ctx["rest_drop"] = round(out["final"] - rested["mass_ratio"], 4)
@@ -621,7 +624,7 @@ def build_tasks(constraints: dict) -> list:
     def _aftercare_absorb(ctx, out):
         ctx["course"] = out["course"]
         ctx["quiet_note"] = out.get("quiet_note")
-        ctx["border_note"] = out.get("border_note")
+        ctx["need_probs"] = out.get("need_probs")
         ctx["course_min"] = out["minutes"]
         ctx["water_expected_l"] = out["expected_water_l"]
         ctx["water_saved_l"] = out["saved_l"]
@@ -725,6 +728,12 @@ def make_executor(registry, on_step=None, seed_ctx=None):
         if ctx.get("doneness") is not None and ctx.get("held_for_doneness"):
             metrics["익힘"] = (f"졸임이 먼저 끝나 약불로 유지하며 익혔다 "
                             f"(익힘 {ctx['doneness']})")
+        if ctx.get("recipe_stats"):
+            st_ = ctx["recipe_stats"]
+            metrics["자료 선별"] = (
+                f"적재 {st_['적재']}건 → 알레르기 {st_['알레르기제외']}건 · "
+                f"나트륨 {st_['나트륨제외']}건 제외 → 후보 {st_['후보']}건"
+                + (f" ({ctx.get('recipe_source')})" if ctx.get("recipe_source") else ""))
         if ctx.get("expired_note"):
             metrics["폐기 대상"] = ctx["expired_note"]
         if ctx.get("delivery_note"):
@@ -767,8 +776,10 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["중간 투입"] = " / ".join(
                 f"{e['name']} {e['grams']}g @{e['at_ratio']} (-{e['temp_drop_c']}도)"
                 for e in ctx["stage_events"])
-        if ctx.get("border_note"):
-            metrics["경계 판정"] = ctx["border_note"]
+        if ctx.get("need_probs"):
+            pr = ctx["need_probs"]
+            metrics["세척 강도 확률"] = ", ".join(
+                f"{k}:{v:.0%}" for k, v in sorted(pr.items()) if v >= 0.005)
         if ctx.get("quiet_note"):
             metrics["소음 조치"] = ctx["quiet_note"]
         if ctx.get("soil") is not None:
@@ -788,6 +799,8 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                 # 공개 레시피에는 실측 조리 시간이 없다. 없는 값을 지어내지 않는다.
                 metrics["기록 고정시간 대비(분)"] = "해당 없음(첫 조리·실측 기록 없음)"
             metrics["최종 질량비"] = ctx["final_ratio"]
+            if ctx.get("residual_pred_err") is not None:
+                metrics["여열 예측 오차"] = ctx["residual_pred_err"]
             if ctx.get("rest_drop"):
                 metrics["여열로 더 졸음"] = (
                     f"불 끌 때 {ctx['off_ratio']} → 먹기 직전 {ctx['final_ratio']} "

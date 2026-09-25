@@ -53,12 +53,22 @@ def plan(goal, tasks, known=()) -> Plan:
     known : 이미 성립해 있는 사실 (그 작업은 건너뛴다)
     """
     goal, known = set(goal), set(known)
-    by_fact = {}
-    for t in tasks:
+    # 같은 사실을 만드는 작업이 둘 이상이면 **조용히 하나를 버리게 된다.**
+    # 어느 쪽이 나은지는 플래너가 알 수 없으므로, 이름순으로 고르되
+    # 그 사실을 근거에 남긴다 — 도메인이 의도한 것인지 볼 수 있어야 한다.
+    by_fact, rival = {}, {}
+    for t in sorted(tasks, key=lambda x: x.skill):
         for f in t.provides:
-            by_fact.setdefault(f, t)
+            if f in by_fact:
+                rival.setdefault(f, [by_fact[f].skill]).append(t.skill)
+            else:
+                by_fact[f] = t
 
     selected, reasoning, unmet = {}, [], set()
+    for f, names in sorted(rival.items()):
+        reasoning.append(f"'{f}' 을 만드는 작업이 {len(names)}개 "
+                         f"({', '.join(names)}) — 이름순으로 {names[0]} 을 "
+                         f"골랐다. 도메인이 의도한 것인지 확인이 필요하다")
     frontier = list(goal - known)
     if goal & known:
         for f in sorted(goal & known):
