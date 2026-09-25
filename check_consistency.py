@@ -211,6 +211,30 @@ def c8():
     return "\n".join(bad)
 
 
+@check("저장된 산출물이 현재 코드보다 오래되지 않았는가")
+def c9():
+    """`scenarios.json` 같은 실행 결과는 저장소에 커밋된다 — 산출물이니까.
+
+    그런데 코드를 고친 뒤 다시 돌리지 않으면 **낡은 결과가 저장소에 남는다.**
+    실제로 `variance.json` 이 코드보다 79분 낡은 채로 있었다. 그 사이
+    건조기 물리와 측정 조건이 바뀌었으니 그 수치는 이미 틀린 것이었다.
+    """
+    import glob
+    import os
+    srcs = [f for f in glob.glob("*.py") + glob.glob("skills/*.py")
+            if not os.path.basename(f).startswith("check_")]
+    newest = max((os.path.getmtime(f) for f in srcs), default=0)
+    bad = []
+    for out in ("scenarios.json", "trace_design.json", "variance.json"):
+        if not os.path.exists(out):
+            bad.append(f"{out} 이 없다")
+            continue
+        age = newest - os.path.getmtime(out)
+        if age > 60:                       # 코드보다 1분 이상 오래됐으면
+            bad.append(f"{out} 이 코드보다 {age / 60:.0f}분 오래됐다 — 다시 돌려야 한다")
+    return "\n".join(bad)
+
+
 def main():
     print("=" * 78)
     print("일관성 검사 — 기계가 확인할 수 있는 것만")

@@ -20,7 +20,7 @@ python run_repeat.py            # 같은 상황 두 번 — 기록이 다음 목
 python run_share.py             # 본가 기록을 자취방·원룸 기기로 이식
 python stress_test.py           # 일부러 망가뜨린 입력 19건
 python check_regression.py      # scenarios.json 회귀 검사
-python check_consistency.py     # 선언·물리·문서 수치·스킬 맞물림 8항목 검사
+python check_consistency.py     # 선언·물리·문서·맞물림·산출물 9항목 검사
 ```
 
 API 키가 없어도 전부 동작한다. 계획은 LLM이 아니라 **전제조건 플래너**가 계산한다.
@@ -313,5 +313,9 @@ python measure_variance.py 500 200   # → variance.json
 
 - `AGENT_정의서.md` — 역할·사용자·Input/Process/Output
 - `재사용_방안.md` — 실증/구조/설계 3등급으로 구분
-- `scenarios.json` · `trace_design.json` — 실행 결과와 단계별 로그
+- `scenarios.json` · `trace_design.json` · `variance.json` — 실행 결과와 단계별 로그
+
+산출물은 저장소에 함께 둔다 — 실행하지 않고도 결과를 볼 수 있어야 하기 때문이다.
+대신 **코드를 고치면 다시 돌려야 한다.** `check_consistency.py` 가 산출물이
+코드보다 오래됐는지 확인한다(실제로 `variance.json` 이 79분 낡은 채 있었다).
 - `data/recipes.json` — 수집한 공개 자료 (출처·인증 방식 기록 포함)

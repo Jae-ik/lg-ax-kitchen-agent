@@ -5,8 +5,9 @@
 스킬을 추가해도 에이전트 코드는 바뀌지 않는다.
 
 두 층이 같은 레지스트리에 들어간다.
-  설계 층  situation_read · scenario_draft · flow_design · experience_verify
-  실행 층  inventory · menu · procure · prep · converge · aftercare
+  설계 층 4  situation_read · scenario_draft · flow_design · experience_verify
+  실행 층 7  recipe_source · inventory · menu · procure · prep ·
+             converge · aftercare
 설계 층이 실행 층을 import 하지 않는다 — 실행은 주입받는다.
 """
 from .base import Skill, SkillResult, Registry
