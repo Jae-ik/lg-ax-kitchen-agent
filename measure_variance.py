@@ -85,17 +85,26 @@ def measure_converge(n: int) -> dict:
                      max_steps=400, max_minutes=45,
                      residual=lambda st: (K.COOKER.predict_residual_g()
                                           / max(1.0, st["initial_mass_g"])))
+        # 사람이 먹는 것은 불 끄는 순간의 음식이 아니라 여열이 끝난 음식이다.
+        # 파이프라인(kitchen_domain)도 그 시점 값을 저장한다. 여기서만
+        # 끌 때 값을 재면 두 산출물이 서로 다른 것을 재게 된다.
+        cook_rested = K.COOKER.rest_until_still()["mass_ratio"]
         K.COOKER.stop()
-        cook_steps.append(r.output["steps"]); cook_final.append(r.output["final"])
+        cook_steps.append(r.output["steps"]); cook_final.append(cook_rested)
 
         # 건조기 — 같은 스킬, 다른 기기
         D.DRYER.start(moisture=0.18, power=2)
         r2 = conv.run(observe=lambda: D.DRYER.state(), actuate=D.DRYER.set_power,
                       step=D.DRYER.tick, metric="moisture", target=0.08,
                       direction="down", ready_key="drum_temp_c", ready_at=45.0,
+                      # 조리기와 **같은 조건**으로 잰다. 한쪽만 여열을 보정하면
+                      # 같은 'final' 이라는 이름으로 다른 의미의 값을 재게 된다
+                      # (건조기는 0.0795 로 꺼도 문 열 때 0.0734 였다).
+                      residual=lambda _s: D.DRYER.predict_residual(),
                       max_steps=40)
+        dry_rested = D.DRYER.rest_until_still()["moisture"]
         D.DRYER.stop()
-        dry_steps.append(r2.output["steps"]); dry_final.append(r2.output["final"])
+        dry_steps.append(r2.output["steps"]); dry_final.append(dry_rested)
 
     print(f"\n[A] converge 단계 수 — 시드 {n}회")
     out = {}

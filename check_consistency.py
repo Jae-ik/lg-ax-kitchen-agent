@@ -141,6 +141,42 @@ def c5():
     return "\n".join(bad)
 
 
+@check("문서에 적힌 기기 측정값이 variance.json 과 같은가")
+def c5b():
+    """c5 는 **페르소나별 가열 시간**만 본다. 그래서 건조기 수치가 낡은 것을
+    한 번 놓쳤다 — 여열 보정을 넣어 11.4분 → 10.6분이 됐는데 문서 5곳이
+    옛 값 그대로였다(README·AGENT 정의서·재사용 방안·영상 대본·설명).
+
+    여기서는 `variance.json` 의 값이 문서에 그대로 적혀 있는지 대조한다.
+    값이 바뀌면 문서를 고치기 전까지 이 검사가 실패한다.
+    """
+    import json
+    import os
+    if not os.path.exists("variance.json"):
+        return "variance.json 이 없다 — measure_variance.py 를 먼저 돌려야 한다"
+    v = json.load(io.open("variance.json", encoding="utf-8"))["converge"]
+
+    # (문서, 그 문서에 반드시 있어야 하는 문자열, 무엇인가)
+    need = []
+    for key, unit, what in (("cooker_steps", "분", "조리기 가열 시간"),
+                            ("dryer_steps", "분", "건조기 건조 시간")):
+        med = v[key]["median"]
+        need.append((f"{med}{unit}", f"{what} 중앙값"))
+    lo, hi = v["dryer_final"]["min"], v["dryer_final"]["max"]
+    need.append((f"{lo}~{hi}", "건조기 최종 함수율 범위"))
+
+    DOCS = ("README.md", "AGENT_정의서.md")
+    bad = []
+    for doc in DOCS:
+        if not os.path.exists(doc):
+            continue
+        text = io.open(doc, encoding="utf-8").read()
+        for token, what in need:
+            if token not in text:
+                bad.append(f"{doc}: {what} 이 현재 측정값({token})과 다르다")
+    return chr(10).join(bad)
+
+
 @check("결과 지표가 장면 검증이 요구하는 이름을 쓰는가")
 def c6():
     import json
