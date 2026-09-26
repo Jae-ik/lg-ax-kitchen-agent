@@ -406,6 +406,9 @@ class AftercareSkill(Skill):
         "soil_sigma": "float              그 측정의 표준편차. 주면 임계 대신 "
                       "확률가중 기대 비용으로 고른다",
         "profile": "str                   코스 프로파일 이름(기기 종류)",
+        "profiles": "dict | None           {이름: [(강도, 코스명, 분, 도, L, dB), …]} "
+                    "기기별 코스표. 주입하면 내장표 대신 쓴다 — 새 기기를 "
+                    "붙일 때 스킬을 고치지 않아도 된다",
         "start_at": "str 'HH:MM' | None   시작 시각",
         "quiet_after": "str 'HH:MM' | None  이 시각 이후 소음을 피해야 한다",
     }
@@ -469,12 +472,20 @@ class AftercareSkill(Skill):
 
     def run(self, soil_score: float, profile: str = "dishwasher",
             start_at: str | None = None, quiet_after: str | None = None,
-            soil_sigma: float = 0.0, **_) -> SkillResult:
-        table = self.PROFILES.get(profile)
+            soil_sigma: float = 0.0, profiles: dict | None = None,
+            **_) -> SkillResult:
+        # 코스표는 **기기별 자료**이지 이 스킬의 로직이 아니다. 주입받을 수
+        # 있어야 "코스 프로파일 표만 교체하면 된다" 가 사실이 된다.
+        # 전에는 클래스 안의 PROFILES 만 봐서, reusable_for 에 적어 둔
+        # 로봇청소기에 쓰려면 스킬 코드를 고쳐야 했다 — 선언이 거짓이었다.
+        table = (profiles or self.PROFILES).get(profile)
         if table is None:
+            known = sorted(profiles or self.PROFILES)
             return SkillResult(False, {"error": f"알 수 없는 프로파일 {profile}",
                                        "recovery": f"'{profile}' 코스표가 없다 — "
-                                                   f"기기 종류를 확인해야 한다"}, [])
+                                                   f"profiles= 로 주입하거나 "
+                                                   f"아는 것 중에서 고르라: "
+                                                   f"{known}"}, [])
         # 오염도는 0~1 이다. 범위를 벗어난 값이 조용히 들어오면 코스가 엉뚱해진다.
         if not (0.0 <= soil_score <= 1.0):
             clipped = min(1.0, max(0.0, soil_score))
