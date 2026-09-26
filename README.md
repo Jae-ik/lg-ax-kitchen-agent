@@ -21,6 +21,7 @@ python run_share.py             # 본가 기록을 자취방·원룸 기기로 �
 python stress_test.py           # 일부러 망가뜨린 입력 19건
 python check_regression.py      # scenarios.json 회귀 검사
 python check_consistency.py     # 선언·물리·문서·맞물림·주장 11항목 검사
+python check_interlock.py       # 스킬 절단 실험 — 각 단계가 뒤에 실제로 영향을 주는가
 ```
 
 API 키가 없어도 전부 동작한다. 계획은 LLM이 아니라 **전제조건 플래너**가 계산한다.
@@ -46,6 +47,7 @@ kitchen.py / dryer.py  기기 시뮬레이터 (ThinQ Connect API 로 교체 가�
                      열 모델은 열량 수지 — 투입·방열·잠열로 계산한다
 check_regression.py  scenarios.json 이 기대값과 같은지 (실행 단계별 ok 까지)
 check_consistency.py 선언·물리·문서·맞물림·주장 11항목 검사
+check_interlock.py   스킬 9단계를 하나씩 교란해 뒤 단계가 실제로 달라지는지 확인
 stress_test.py       일부러 망가뜨린 입력 52건
 ```
 
