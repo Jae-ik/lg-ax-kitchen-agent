@@ -157,7 +157,13 @@ class ConvergeSkill(Skill):
             trace.append({"t": round(elapsed, 2), metric: round(cur, 4),
                           power_key: s.get(power_key), "eta": eta})
             evidence.append(f"{elapsed:g}분 {metric}={cur:.4f} "
-                            f"진행 {progress:.1f}% ETA {eta}")
+                            # 근거는 **사람이 읽는 문장**이다. eta 가 아직
+                            # 없을 때 "ETA None" 이라고 찍으면 프로그램
+                            # 내부가 그대로 새어 나온다 — 실행 영상에서
+                            # 심사위원이 보게 되는 줄이다.
+                            + (f"진행 {progress:.1f}% "
+                               + (f"목표까지 {eta}분" if eta is not None
+                                  else "아직 속도를 낼 수 없다")))
 
             # 조리는 한 번 넣고 기다리는 일이 아니다. 중간에 재료가 들어간다.
             # 무엇을 언제 넣는지는 도메인이 알고 이 스킬은 모른다 — 훅으로

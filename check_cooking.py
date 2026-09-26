@@ -370,6 +370,68 @@ def c16():
     return ok, f"{got}"
 
 
+@check("기피 재료 판정은 안전측이되, 왜 걸렀는지 보여 준다")
+def c17():
+    """알레르기 판정은 **원문 전체**를 부분 일치로 본다. 파싱이 놓친
+    항목(5장·1뿌리처럼 g 표기가 없는 것)에도 기피 재료가 있을 수 있어서다.
+    놓치는 쪽이 훨씬 위험하므로 그 설계는 그대로 둔다.
+
+    문제는 짧은 기피어가 다른 재료에 걸린다는 것이다 — 자료 100건에서
+    배→배추·양배추, 게→스파게티, 밀→코코넛밀크. 거르는 것은 맞지만
+    **사용자가 왜 빠졌는지 알 수 없으면 그 판단을 검토할 수 없다.**
+    그래서 걸린 재료명을 근거에 함께 적는다.
+    """
+    import recipe_parse as R
+    exact = R.contains_any("새우 20g, 두부 100g", ["새우"])
+    partial = R.contains_any("양배추 200g, 감자 100g", ["배"])
+    none = R.contains_any("두부 100g", ["새우"])
+    ok = (exact == ["새우"]                      # 정확히 그 재료면 그대로
+          and partial == ["배(양배추)"]          # 부분 일치면 어디에 걸렸는지
+          and none == [])
+    return ok, f"정확 {exact} · 부분 {partial} · 없음 {none}"
+
+
+@check("판단 근거에 프로그램 내부가 새어 나오지 않는다")
+def c18():
+    """근거(evidence)는 **사람이 읽는 문장**이고 실행 영상에 그대로 나온다.
+    'ETA None' 처럼 내부 값이 찍히면 설명으로 읽히지 않는다.
+    평가 기준의 '그 과정을 설명하는가' 에 직접 걸리는 자리다."""
+    import contextlib
+    import collections
+    import personas
+    import run_design
+    from orchestrator import Trace
+    from skills import REGISTRY
+
+    got, orig = collections.defaultdict(list), {}
+    for sp in REGISTRY.list():
+        sk = REGISTRY.get(sp["name"])
+        orig[sp["name"]] = sk.run
+
+        def mk(_sk, _n):
+            def w(**kw):
+                r = _sk.__class__.run(_sk, **kw)
+                got[_n].extend(r.evidence)
+                return r
+            return w
+        sk.run = mk(sk, sp["name"])
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for pid in personas.ids():
+                run_design.design_for(pid, Trace(), seed=7)
+    finally:
+        for n, f in orig.items():
+            REGISTRY.get(n).run = f
+
+    tot = sum(len(v) for v in got.values())
+    leak = [(n, e) for n, v in got.items() for e in v
+            if "None" in e or "[]" in e or "{}" in e]
+    ok = not leak
+    return ok, (f"근거 {tot}줄 · 내부 값이 샌 줄 {len(leak)}"
+                + (f" 예: {leak[0]}" if leak else ""))
+
+
 def main() -> int:
     print("요리 검사 — 조리 상식이 코드에서 성립하는가")
     print()

@@ -101,4 +101,21 @@ def contains_any(text: str, keywords) -> list[str]:
     있을 수 있는데, 안전 판정에서 그것을 놓치면 안 되기 때문이다.
     """
     t = text or ""
-    return [k for k in keywords if k in t]
+    out = []
+    for k in keywords:
+        if k not in t:
+            continue
+        # **어느 재료에 걸렸는지 함께 적는다.**
+        #
+        # 짧은 기피어는 다른 재료에 부분 일치한다 — 자료 100건에서
+        #   배 → 배추(3)·양배추(2)·적양배추(1)
+        #   게 → 스파게티(1)      밀 → 코코넛밀크(1)      파 → 파프리카(2)
+        # 안전 판정이므로 **거르는 것 자체는 그대로 둔다**(놓치는 쪽이
+        # 훨씬 위험하다). 다만 사용자가 "양배추감자전이 왜 빠졌지" 를
+        # 알 수 없으면 그 판단을 검토할 수 없다. 걸린 재료를 적어 둔다.
+        names = [i["name"] for i in parse_ingredients(t) if k in i["name"]]
+        if any(n == k for n in names) or not names:
+            out.append(k)                      # 정확히 그 재료다
+        else:
+            out.append(f"{k}({'·'.join(names[:3])})")   # 부분 일치
+    return out
