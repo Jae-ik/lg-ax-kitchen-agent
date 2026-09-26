@@ -673,6 +673,69 @@ def t52():
         rec = saved
     return f"{sizes} (같아야 한다 — 저장에 인분 수가 남아야)"
 
+# ═══════════════ 8. 요리 물리의 모순 ═══════════════
+@case("찬물을 부으면 온도가 떨어지는가")
+def t53():
+    K.reset()
+    K.COOKER.start(500, 0, power=3, capacity_g=1100)
+    for _ in range(8):
+        K.COOKER.tick(1.0)
+    b = K.COOKER.state()["temp_c"]
+    e = K.COOKER.add_water(50)
+    K.COOKER.stop()
+    return (f"{b}도 → {e['temp_drop_c']}도 하강 "
+            f"(0 이면 물리 모순)")
+
+
+@case("재료를 넣어 냄비를 넘기면 알리는가")
+def t54():
+    K.reset()
+    K.COOKER.start(900, 0, power=3, capacity_g=1000)
+    e = K.COOKER.add_ingredient("두부", 300)
+    K.COOKER.stop()
+    return f"채움 {e['fill_ratio']} 초과={e['overfilled']} · {e.get('warning', '')[:44]}"
+
+
+@case("늦게 넣은 재료는 그때부터 익는가")
+def t55():
+    K.reset()
+    K.COOKER.start(400, 0, power=3, capacity_g=1100, need_units=200)
+    for _ in range(4):
+        K.COOKER.tick(1.0)
+    d1 = K.COOKER.state()["doneness"]
+    K.COOKER.add_ingredient("닭고기", 300, need_units=300)
+    d2 = K.COOKER.state()["doneness"]
+    K.COOKER.stop()
+    return f"투입 전 {d1:.3f} → 후 {d2:.3f} (내려가야 한다)"
+
+
+@case("뚜껑을 덮으면 더 잘 넘치는가")
+def t56():
+    out = []
+    for lid in (False, True):
+        K.reset(seed=3)
+        K.COOKER.start(900, 0, power=3, capacity_g=1100, lid=lid)
+        while K.COOKER.state()["temp_c"] < 99.9 and K.COOKER.elapsed_min < 30:
+            K.COOKER.tick(0.5)
+        K.COOKER.set_power(5)
+        K.COOKER.tick(1.0)
+        out.append(f"{'덮음' if lid else '엶'} {K.COOKER.state()['overflow_risk']}")
+        K.COOKER.stop()
+    return " / ".join(out)
+
+
+@case("거품을 걷으면 고형분에서 빠지는가")
+def t57():
+    K.reset()
+    K.COOKER.start(1000, 0, power=3, capacity_g=3000, solid_g=400)
+    b = K.COOKER.state()["free_liquid_g"]
+    K.COOKER.skim(50)
+    a = K.COOKER.state()["free_liquid_g"]
+    solid = K.COOKER.solid_g
+    K.COOKER.stop()
+    return (f"고형분 400 → {solid:.0f} · 자유수분 {b} → {a} "
+            f"(국물이 거의 안 줄어야 한다)")
+
 
 def main():
     tests = [v for k, v in sorted(globals().items())

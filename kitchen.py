@@ -309,6 +309,8 @@ class Cooker:
     LOSS_W_PER_K: float = 2.28        # 주변으로 나가는 열 (뚜껑 열었을 때)
     LID_LOSS: float = 0.45            # 뚜껑을 덮으면 손실이 이 비율
     LID_EVAP: float = 0.15            # 뚜껑을 덮으면 증발한 물이 맺혀 돌아온다
+    LID_OVERFLOW: float = 1.6         # 뚜껑을 덮으면 거품이 갇혀 더 잘 넘친다
+    SKIM_SOLID: float = 0.8           # 걷어낸 거품 중 고형분(단백질·기름) 비율
     SURF_EVAP: float = 0.02           # 끓지 않을 때 표면 증발 g/(K·분)
     # 불을 끄고 상에 올리기까지. 이 사이에도 물은 날아가므로 **기록에 남길
     # 값은 이 시점의 것**이다. 3분은 가정이며, 실제로는 가구마다 다르다.
@@ -330,7 +332,10 @@ class Cooker:
             return 0.0
         fill = self.mass_g / self.capacity_g
         boil = max(0.0, (self.temp_c - 95) / 5)          # 95도부터 거품이 인다
-        return round(min(1.0, fill * boil * (self.power / 5)), 3)
+        # 뚜껑을 덮으면 거품이 갇혀 **더 잘 넘친다.** 국물 요리에서 넘치는
+        # 것은 대개 뚜껑을 덮어 둔 채 화력을 올렸을 때다.
+        lid_factor = self.LID_OVERFLOW if self.lid else 1.0
+        return round(min(1.0, fill * boil * (self.power / 5) * lid_factor), 3)
 
     def free_liquid_g(self) -> float:
         """졸일 수 있는 **자유 수분**. 고형분과 재료가 빨아들인 물은 뺀다.
@@ -349,13 +354,17 @@ class Cooker:
         take = min(grams, max(0.0, self.mass_g - self.solid_g))
         self.mass_g -= take
         self.skimmed_g += take
+        # 걷어내는 것은 **떠오른 단백질·기름**이지 국물이 아니다.
+        # 고형분에서 빼지 않으면 자유 수분(졸일 수 있는 물)이 그만큼
+        # 줄어든 것으로 계산돼, 실제보다 빨리 "국물이 바닥났다" 고 본다.
+        self.solid_g = max(0.0, self.solid_g - take * self.SKIM_SOLID)
         # 걷어낸 만큼 분모에서도 뺀다. 그러지 않으면 제어기가 이것을
         # 졸아든 것으로 읽어 목표에 일찍 닿았다고 착각한다.
         self.initial_mass_g = max(1.0, self.initial_mass_g - take)
         return {"what": what, "grams": round(take, 1),
                 "mass_g": round(self.mass_g, 1)}
 
-    def add_water(self, grams: float):
+    def add_water(self, grams: float, temp_c: float = 18.0):
         """물을 부어 되돌린다.
 
         졸이는 것은 되돌릴 수 없다고 가정해 왔지만, 요리에는 되돌릴 수단이
@@ -365,9 +374,15 @@ class Cooker:
         """
         if not self.running or grams <= 0:
             return None
-        self.mass_g += grams
+        # 찬물을 부으면 **온도가 떨어진다.** 재료를 넣을 때는 이 계산을
+        # 하면서 물만 빠뜨리고 있었다 — 같은 물리인데 한쪽만 구현돼 있었다.
+        before_t = self.temp_c
+        total = self.mass_g + grams
+        self.temp_c = (self.mass_g * self.temp_c + grams * temp_c) / total
+        self.mass_g = total
         self.watered_g += grams
         return {"grams": round(grams, 1), "mass_g": round(self.mass_g, 1),
+                "temp_drop_c": round(before_t - self.temp_c, 1),
                 "dilution": round(self.watered_g / max(1.0, self.mass_g), 4)}
 
     def set_lid(self, closed: bool):
@@ -572,7 +587,8 @@ class Cooker:
                 break
         return self.state()
 
-    def add_ingredient(self, name: str, grams: float, temp_c: float = 8.0):
+    def add_ingredient(self, name: str, grams: float, temp_c: float = 8.0,
+                       need_units: float = 0.0):
         """조리 도중 재료를 넣는다.
 
         된장찌개에서 두부는 처음부터 넣지 않는다 — 부서진다. 그런데 지금까지
@@ -595,11 +611,24 @@ class Cooker:
         self.mass_g = total
         self.initial_mass_g += grams          # 졸임 비율의 분모도 늘린다
         self.added_g += grams
+        # 나중에 넣은 재료는 **넣은 뒤부터** 익는다. 익힘 누적은 냄비 전체
+        # 온도로만 쌓이므로, 늦게 들어온 재료가 익힘을 요구하면 요구량을
+        # 그만큼 늘려 아직 덜 익은 것으로 본다. (재료별로 따로 세는 것이
+        # 정확하지만, 지금 모델에서는 이 근사로 방향은 맞춘다.)
+        if need_units > 0:
+            self.need_units += need_units
         self.log.append((round(self.elapsed_min, 1), round(self.mass_g, 1),
                          round(self.temp_c, 1)))
+        # 넣고 나서 냄비를 넘치면 그것은 투입이 아니라 사고다.
+        over = (self.mass_g / self.capacity_g) if self.capacity_g else 0.0
         return {"name": name, "grams": grams,
                 "temp_drop_c": round(before_t - self.temp_c, 1),
-                "mass_g": round(self.mass_g, 1)}
+                "mass_g": round(self.mass_g, 1),
+                "fill_ratio": round(over, 3),
+                "overfilled": over > 1.0,
+                "warning": (f"{name} 을 넣으면 냄비 용량의 {over:.0%} 가 된다 — "
+                            f"넘친다. 나눠 담거나 더 큰 냄비가 필요하다"
+                            if over > 1.0 else None)}
 
     def set_power(self, level: int):
         self.power = max(0, min(5, int(level)))

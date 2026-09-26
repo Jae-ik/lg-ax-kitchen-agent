@@ -363,7 +363,8 @@ def build_tasks(constraints: dict) -> list:
             if not e:
                 return None
             ctx["recovered"] = (f"{e['grams']}g 을 부어 목표로 되돌렸다 "
-                                f"(국물이 {e['dilution']:.1%} 묽어졌다)")
+                                f"(국물이 {e['dilution']:.1%} 묽어지고 "
+                                f"{e['temp_drop_c']}도 식었다)")
             return {"note": ctx["recovered"], "water_g": e["grams"]}
         return recover
 
@@ -470,14 +471,17 @@ def build_tasks(constraints: dict) -> list:
             if state["mass_ratio"] > nxt["at_ratio"]:
                 return None
             pending.pop(0)
-            e = K.COOKER.add_ingredient(nxt["name"], nxt["grams"],
-                                        temp_c=nxt["temp_c"])
+            e = K.COOKER.add_ingredient(
+                nxt["name"], nxt["grams"], temp_c=nxt["temp_c"],
+                need_units=COOK_UNITS.get(nxt["name"], 0.0) * nxt["grams"])
             if not e:
                 return None
             hand("투입", f"{nxt['name']} {nxt['grams']}g 을 넣는다")
             ctx.setdefault("stage_events", []).append(
                 {"name": nxt["name"], "at_ratio": nxt["at_ratio"],
                  "grams": nxt["grams"], "temp_drop_c": e["temp_drop_c"]})
+            if e.get("warning"):
+                ctx.setdefault("overfill_warn", []).append(e["warning"])
             return {"note": (f"{nxt['name']} {nxt['grams']}g 투입 "
                              f"(질량비 {nxt['at_ratio']} 시점) — 온도 "
                              f"{e['temp_drop_c']}도 하강"
@@ -726,6 +730,8 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                             f"(익힘 {ctx['doneness']})")
         # 제안의 핵심 구분인데 결과에 없었다 — 내 기록을 쓴 것인지
         # 공개 레시피를 쓴 것인지는 "저장한 것이 다시 쓰인다" 의 증거다.
+        if ctx.get("overfill_warn"):
+            metrics["용량 초과"] = " / ".join(ctx["overfill_warn"])
         if ctx.get("approved_after_ask"):
             metrics["확인 후 승인"] = ctx["approved_after_ask"]
         if ctx.get("overshoot") is not None:
