@@ -12,6 +12,7 @@
 각 항목은 "이렇게 하면 이렇게 되어야 한다" 는 한 문장으로 적는다.
 """
 from __future__ import annotations
+import io
 import sys
 
 import kitchen as K
@@ -325,6 +326,48 @@ def c14():
     ok = spread < 0.01 and len({round(t, 1) for *_, t, _ in outs}) > 1
     return ok, " · ".join(f"{m}g/화력{p} {t:.1f}분→{r:.4f}"
                           for m, p, t, r in outs)
+
+
+# ── 공개 자료 읽기 ──────────────────────────────────────────────────────
+@check("재료 이름을 잘못 자르지 않는다")
+def c15():
+    """사람이 읽으라고 쓴 재료 문장을 구조화한다. 이름을 잘못 자르면
+    재고의 '간장' 과 대조되지 않아 **없는 재료로 잡혀 조달로 넘어간다.**
+
+    실제로 접두어 규칙이 한 글자 접두어(간·생)를 공백 없이도 떼어내고
+    있었다. 자료 100건에서 간장→장 6회, 생강→강 5회, 생크림→크림 8회.
+    """
+    import recipe_parse as R
+    want = {"간장 10g": "간장", "생강 5g": "생강", "생크림 100g": "생크림",
+            "저염간장 20g": "간장", "다진마늘 10g": "마늘",
+            "간 마늘 10g": "마늘", "달걀 1개 50g": "달걀"}
+    bad = [f"{t}→{R.parse_ingredients(t)[0]['name'] if R.parse_ingredients(t) else '?'}"
+           f"(기대 {w})"
+           for t, w in want.items()
+           if not (R.parse_ingredients(t)
+                   and R.parse_ingredients(t)[0]["name"] == w)]
+    # 실제 자료에서 한 글자 이름이 실재 재료뿐인지도 본다
+    import json
+    rows = json.load(io.open("data/recipes.json", encoding="utf-8"))["recipes"]
+    names = {i["name"] for r in rows
+             for i in R.parse_ingredients(r.get("parts_raw") or "")}
+    REAL_ONE = {"무", "꿀", "잣", "파", "배", "쌀", "떡", "밥", "물", "국"}
+    odd = sorted(n for n in names if len(n) == 1 and n not in REAL_ONE)
+    ok = not bad and not odd
+    return ok, (f"표기 {len(want)}종 " + ("전부 맞음" if not bad else str(bad))
+                + f" · 자료 {len(rows)}건에서 설명 안 되는 한 글자 이름 "
+                + (str(odd) if odd else "없음"))
+
+
+@check("같은 재료가 두 번 나오면 합친다")
+def c16():
+    """밑간용 간장 + 조림용 간장처럼 실제 레시피에 흔하다. 뒤엣것을
+    버리면 양이 적게 계산된다(자료 100건에서 11건)."""
+    import recipe_parse as R
+    got = R.parse_ingredients("간장 10g, 간장 5g, 설탕 20g")
+    d = {i["name"]: i["qty_g"] for i in got}
+    ok = d.get("간장") == 15.0 and d.get("설탕") == 20.0 and len(got) == 2
+    return ok, f"{got}"
 
 
 def main() -> int:

@@ -21,12 +21,28 @@ P_PAREN = re.compile(rf"({NAME})\s*\(\s*(?:[^()]*?,\s*)?([\d]+(?:\.[\d]+)?)\s*g\
 P_PLAIN = re.compile(rf"({NAME})\s*([\d]+(?:\.[\d]+)?)\s*g")
 
 # 재료명 앞에 붙는 조리 상태. 같은 재료를 다른 이름으로 세지 않기 위해 떼어낸다.
-PREFIX = re.compile(r"^(다진|저염|생|말린|삶은|불린|간|채썬|건|냉동|시판|무염)\s*")
+# 한 글자 접두어(간·생·건)는 **뒤에 공백이 있을 때만** 떼어낸다.
+# 예전에는 공백 없이도 떼어내, 실제 자료 100건에서
+#   간장 -> 장 (6회) · 생강 -> 강 (5회) · 생크림 -> 크림 (8회)
+#   생강청 -> 강청 (3회) · 생강즙 -> 강즙 (2회)
+# 가 됐다. '장' 은 재고의 '간장' 과 대조되지 않아 없는 재료로 잡힌다.
+# 두 글자 이상 접두어는 붙여 쓰는 것이 보통이라 공백을 요구하지 않는다
+# (저염간장 -> 간장 9회 · 다진마늘 -> 마늘 6회 · 저염된장 -> 된장 4회).
+# 잃는 것은 '건새우 -> 새우' 3회뿐이고, 얻는 것이 24회다.
+PREFIX = re.compile(
+    r"^(?:(?:다진|저염|말린|삶은|불린|채썬|냉동|시판|무염)\s*|(?:간|생|건)\s+)")
+# 이름 뒤에 남는 개수 표기. "달걀 1개 50g" 에서 이름이 '달걀 1개' 가 되면
+# 재고의 '달걀' 과 대조되지 않아 없는 재료로 잡힌다.
+# (실제 자료 100건·재료 1025개 중 2건: '달걀 1개', '오징어 1마리')
+COUNT_SUFFIX = re.compile(
+    r"\s*\d+(?:\.\d+)?\s*"
+    r"(개|마리|장|알|쪽|톨|뿌리|줄기|컵|큰술|작은술|봉|팩|공기|인분|모|송이|단)?$")
 JUNK = {"", "물", "약간", "적당량"}
 
 
 def clean(name: str) -> str:
     name = PREFIX.sub("", name.strip()).strip()
+    name = COUNT_SUFFIX.sub("", name).strip()
     return re.sub(r"\s+", " ", name)
 
 
@@ -61,7 +77,16 @@ def parse_ingredients(text: str) -> list[dict]:
         if not m:
             continue
         name, qty = clean(m.group(1)), float(m.group(2))
-        if name in JUNK or name in seen or len(name) > 12:
+        if name in JUNK or len(name) > 12:
+            continue
+        if name in seen:
+            # 같은 재료가 두 번 나오면 **합친다.** 전에는 뒤엣것을 버려서
+            # 양이 적게 계산됐다 (밑간용 간장 + 조림용 간장처럼 실제
+            # 레시피에 흔하다. 자료 100건에서 11건).
+            for o in out:
+                if o["name"] == name:
+                    o["qty_g"] = round(o["qty_g"] + qty, 2)
+                    break
             continue
         seen.add(name)
         out.append({"name": name, "qty_g": qty})
