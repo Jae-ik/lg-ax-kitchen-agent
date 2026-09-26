@@ -164,7 +164,26 @@ def reset(fridge_items=None, seed: int = 7, keep_records: bool = False):
     COOKER.temp_c = 20.0
     COOKER.power = 0
     COOKER.log.clear()
+    # **물리 상수도 되돌린다.** 이 함수의 목적이 "매번 같은 출발점" 인데,
+    # 상수는 손대지 않고 있었다. COOKER 는 모듈 전역 객체 하나를 계속
+    # 재사용하므로, 시험이나 실험이 상수를 바꾼 채 두면 그 뒤 모든 실행이
+    # 조용히 오염된다 — 실제로 민감도 분석에서 앞 항목의 변경이 누적돼
+    # 뚜껑을 쓰지도 않는 실행에서 LID_EVAP 이 결과를 바꾸는 것처럼 보였다.
+    reset_constants()
     return fridge_list_items()
+
+
+def reset_constants(dev=None):
+    """물리 상수를 선언된 기본값으로 되돌린다.
+
+    dataclass 의 필드 기본값을 그대로 쓴다. 상수를 새로 추가해도 이
+    함수를 고칠 필요가 없다 — 대문자 이름이면 자동으로 포함된다.
+    """
+    import dataclasses
+    target = dev if dev is not None else COOKER
+    for f in dataclasses.fields(target):
+        if f.name.isupper() and f.default is not dataclasses.MISSING:
+            setattr(target, f.name, f.default)
 
 
 def fridge_add(name: str, qty_g: int, shelf_life_days: int = 5):
@@ -589,7 +608,7 @@ class Cooker:
         ghost.power = 0
         ghost.deterministic = True
         before = ghost.mass_g
-        for _ in range(horizon_min or self.REST_MIN):
+        for _ in range(int(math.ceil(horizon_min or self.REST_MIN))):
             prev = ghost.mass_g
             ghost.tick(1.0)
             if prev - ghost.mass_g < 0.01:
@@ -609,7 +628,9 @@ class Cooker:
         저장하면 재현할 때 그 지점에서 또 여열이 붙어 회차마다 더 졸아든다.
         """
         self.set_power(0)
-        for _ in range(max_min or self.REST_MIN):
+        # 분 단위를 실수로 받을 수 있으므로 정수로 올림해 쓴다 —
+        # range() 에 float 이 들어가면 그 자리에서 깨진다.
+        for _ in range(int(math.ceil(max_min or self.REST_MIN))):
             before = self.mass_g
             self.tick(1.0)
             if before - self.mass_g < 0.01:
