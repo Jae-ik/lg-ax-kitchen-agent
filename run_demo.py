@@ -101,13 +101,21 @@ def scenario_laundry(trace):
         REGISTRY, trace, "converge",
         observe=lambda: D.DRYER.state(), actuate=D.DRYER.set_power,
         step=D.DRYER.tick, metric="moisture", target=0.08, direction="down",
+        # 조리기에 쓰던 여열 보정을 **스킬을 고치지 않고** 건조기에 붙인다.
+        # 드럼 열로 건조가 이어지므로 이 값이 없으면 항상 지나친다 —
+        # 목표 0.08 에 0.0797 로 꺼도 문 열 때는 0.0734 다(8.2% 과건조).
+        # 주입하면 오차 0.0066 → 0.0006 (11배).
+        residual=lambda _s: D.DRYER.predict_residual(),
         ready_key="drum_temp_c", ready_at=45.0, max_steps=40)
+    # 사람이 꺼내 입는 것은 끄는 순간의 옷이 아니라 여열이 끝난 옷이다.
+    rested = D.DRYER.rest_until_still()
     D.DRYER.stop()
 
     after = run_skill(REGISTRY, trace, "aftercare", soil_score=0.36, profile="washer")
 
     trace.stage("OUTPUT",
-                f"건조 완료 — {conv.output['steps']}분에 함수율 {conv.output['final']} 도달",
+                f"건조 완료 — {conv.output['steps']}분에 끄고, 여열이 끝난 "
+                f"함수율 {rested['moisture']} (끌 때 {conv.output['final']})",
                 {"세탁조코스": after.output["course"],
                  "기본코스_대비_기대물_절감_L": after.output["saved_l"]})
     return conv, after
@@ -128,7 +136,8 @@ def main():
 
     banner("재사용 증거")
     print(f"  converge  조리기 {c1.output['steps']}단계로 질량비 {c1.output['final']} 도달")
-    print(f"            건조기 {c2.output['steps']}단계로 함수율 {c2.output['final']} 도달")
+    print(f"            건조기 {c2.output['steps']}단계로 함수율 {c2.output['final']} 에서 끔 "
+          f"(여열 뒤 {D.DRYER.moisture:.4f} — 목표 0.08)")
     print(f"            → 스킬 코드 동일. 관측·액추에이터 함수만 교체")
     print(f"  aftercare 식기세척기 '{a1.output['course']}' / 세탁기 '{a2.output['course']}'")
     print(f"            → 스킬 코드 동일. 코스 프로파일만 교체")

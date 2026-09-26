@@ -149,6 +149,11 @@ class MenuSkill(Skill):
                 recovery = (f"실행 가능한 후보가 없다 — 검토한 {len(records)}건 중 "
                             f"{len(dropped)}건이 제외됐다"
                             + (" (기피 재료 또는 재고 부족)" if dropped else ""))
+        # 사유를 output 에만 넣으면, 스킬을 단독으로 쓸 때 근거가 빈 채로
+        # 나간다(기록이 0건이면 채점 루프가 아예 안 돌아 ev 가 비어 있다).
+        # 판단 근거는 호출자가 누구든 읽을 수 있어야 한다.
+        if recovery:
+            ev.append(recovery)
         return SkillResult(bool(out), {"candidates": out, "dropped": dropped,
                                        "recovery": recovery,
                                        "best": out[0] if out else None}, ev)

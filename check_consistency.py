@@ -310,6 +310,64 @@ def c11():
     return "\n".join(bad)
 
 
+@check("같은 구조의 기기가 같은 물리 기능을 갖는가")
+def c12():
+    """한 기기를 고치고 다른 기기를 안 고치는 일이 반복됐다.
+
+    · 시간 스텝 버그를 조리기만 고치고 건조기는 그대로 뒀다(2026-09-25).
+    · 여열 예측·여열 구간을 조리기에만 넣어, 건조기는 목표 0.08 에
+      0.0797 로 꺼 놓고 문 열 때 0.0734 였다 — 8.2% 과건조(2026-09-26).
+
+    "같은 스킬이 다른 기기에서 동작한다" 가 제안의 핵심인데, 기기 쪽
+    물리가 서로 다르면 그 주장을 뒷받침하지 못한다. 그래서 두 기기가
+    같은 이름의 능력을 갖는지 기계로 대조한다.
+    """
+    import kitchen as K
+    import dryer as D
+
+    # (조리기 이름, 건조기 이름, 무엇인가)
+    PAIRS = [("tick", "tick", "시간 진행"),
+             ("state", "state", "관측"),
+             ("set_power", "set_power", "조작"),
+             ("stop", "stop", "정지"),
+             ("predict_residual_g", "predict_residual", "여열 예측"),
+             ("rest_until_still", "rest_until_still", "여열 구간")]
+    bad = []
+    for a, b, what in PAIRS:
+        if not hasattr(K.COOKER, a):
+            bad.append(f"조리기에 {a} 가 없다 ({what})")
+        if not hasattr(D.DRYER, b):
+            bad.append(f"건조기에 {b} 가 없다 ({what}) — "
+                       f"조리기에는 {a} 가 있다")
+    for dev, name in ((K.COOKER, "조리기"), (D.DRYER, "건조기")):
+        if not hasattr(dev, "deterministic"):
+            bad.append(f"{name}에 deterministic 플래그가 없다 — 예측이 "
+                       f"실제 난수를 오염시킨다")
+        if not hasattr(dev, "REST_MIN"):
+            bad.append(f"{name}에 REST_MIN 이 없다 — 여열 구간의 길이가 "
+                       f"정의되지 않았다")
+
+    # 여열 보정이 실제로 이득인지 건조기에서 직접 잰다.
+    # 값이 아니라 **방향**만 본다 — 상수를 바꾸면 값은 달라진다.
+    from skills import REGISTRY
+    conv = REGISTRY.get("converge")
+    errs = {}
+    for use in (False, True):
+        D.DRYER.deterministic = True
+        D.DRYER.start(moisture=0.18, power=2)
+        kw = dict(observe=lambda: D.DRYER.state(), actuate=D.DRYER.set_power,
+                  step=D.DRYER.tick, metric="moisture", target=0.08,
+                  direction="down", max_steps=40)
+        if use:
+            kw["residual"] = lambda _s: D.DRYER.predict_residual()
+        conv.run(**kw)
+        errs[use] = abs(0.08 - D.DRYER.rest_until_still()["moisture"])
+    if errs[True] >= errs[False]:
+        bad.append(f"건조기에서 여열 보정이 이득이 아니다 — "
+                   f"보정 {errs[True]:.4f} vs 미보정 {errs[False]:.4f}")
+    return chr(10).join(bad)
+
+
 def main():
     print("=" * 78)
     print("일관성 검사 — 기계가 확인할 수 있는 것만")
