@@ -166,9 +166,9 @@
   "text": "converge 실행",
   "data": {
    "reached": true,
-   "observations": 9,
+   "observations": 10,
    "steps": 7.65,
-   "final": 0.7799,
+   "final": 0.775,
    "target": 0.78,
    "too_small": false,
    "events": [],
@@ -176,7 +176,7 @@
    "guard_notes": [],
    "held": false,
    "overshot": false,
-   "overshoot": 0.0001
+   "overshoot": 0.005
   }
  },
  {
@@ -255,17 +255,17 @@
   "text": "converge 실행",
   "data": {
    "reached": true,
-   "steps": 10.5,
+   "steps": 10.6,
    "observations": 13,
-   "final": 0.0861,
-   "predicted_final": 0.0794,
+   "final": 0.086,
+   "predicted_final": 0.0793,
    "target": 0.08,
    "events": [],
-   "coasted_from": 10.5,
+   "coasted_from": 10.6,
    "guard_notes": [],
    "too_small": false,
    "overshot": false,
-   "overshoot": 0.0006
+   "overshoot": 0.0007
   }
  },
  {
@@ -308,7 +308,7 @@
  },
  {
   "stage": "OUTPUT",
-  "text": "건조 완료 — 10.5분에 끄고, 여열이 끝난 함수율 0.0797 (끌 때 0.0861)",
+  "text": "건조 완료 — 10.6분에 끄고, 여열이 끝난 함수율 0.0796 (끌 때 0.086)",
   "data": {
    "세탁조코스": "표준",
    "기본코스_대비_기대물_절감_L": 0.0

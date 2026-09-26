@@ -306,7 +306,12 @@ class Cooker:
     LATENT_J_PER_G: float = 2260.0    # 증발 잠열
     POT_EQ_G: float = 172.0           # 냄비 열용량 (물 환산 g)
     WATT_PER_POWER: float = 298.0     # 화력 한 단계당 투입 열량 W
-    LOSS_W_PER_K: float = 2.28        # 주변으로 나가는 열 (뚜껑 열었을 때)
+    # 2.28 이었다. 표면 증발이 잠열을 가져가도록 고치자 증발도 냄비를
+    # 식히게 되어, 같은 방열 계수로는 100→90도가 2.60분(근거 3분)이 됐다.
+    # 새 모델 안에서 근거 둘을 다시 맞춰 역산했다 — 1.90 이면 냉각 3.05분,
+    # 화력3 가열 5.55분(근거 3분·5.5분). 모델을 고치면 그 위에서 정한
+    # 상수도 같이 낡는다는 것을 또 확인한 자리다.
+    LOSS_W_PER_K: float = 1.90        # 주변으로 나가는 열 (뚜껑 열었을 때)
     LID_LOSS: float = 0.45            # 뚜껑을 덮으면 손실이 이 비율
     LID_EVAP: float = 0.15            # 뚜껑을 덮으면 증발한 물이 맺혀 돌아온다
     LID_OVERFLOW: float = 1.6         # 뚜껑을 덮으면 거품이 갇혀 더 잘 넘친다
@@ -487,10 +492,20 @@ class Cooker:
 
         # 끓지 않아도 뜨거운 표면에서는 물이 날아간다. 여열 구간이 이 몫이다.
         t_mid = (t_before + self.temp_c) / 2
-        evap = evap_boil + self.SURF_EVAP * max(0.0, t_mid - 40) * minutes
+        surf = self.SURF_EVAP * max(0.0, t_mid - 40) * minutes
+        evap = evap_boil + surf
         # 뚜껑을 덮으면 증발한 물이 맺혀 돌아온다 — 졸지 않는다.
         if self.lid:
             evap *= self.LID_EVAP
+            surf *= self.LID_EVAP
+        # **증발은 잠열을 가져간다** — 땀이 식히는 것과 같다. 끓는 몫
+        # (evap_boil)은 이미 p_net 에서 빼 썼지만, 표면 증발은 질량만
+        # 줄이고 에너지를 쓰지 않고 있었다. 95도에서 1분에 2439 J 가
+        # 공짜로 생겼고(같은 조건 방열 10117 J 의 24%), 그만큼 여열
+        # 구간이 천천히 식어 물이 실제보다 많이 날아갔다.
+        # 끓는 중에는 온도가 이미 고정이므로 손대지 않는다.
+        if self.temp_c < self.BOIL_C and surf > 0:
+            self._set_temp(self.temp_c - surf * self.LATENT_J_PER_G / heat_cap)
         # 자유 수분보다 많이 날아갈 수는 없다. 바닥나면 증발이 멎는다.
         evap = min(evap, self.free_liquid_g())
         # 회차 간 편차. **예측용 복사본에서는 넣지 않는다** — 예측이 전역
