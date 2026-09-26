@@ -44,8 +44,15 @@ class InventorySkill(Skill):
             else:
                 ev.append(f"{i['name']} {i['stored_days']}/{life}일 (소진율 {r:.0%}) — 여유")
         scored.sort(key=lambda x: -x["urgency"])
-        return SkillResult(bool(scored), {"urgent": scored, "count": len(scored),
-                                          "expired": expired}, ev)
+        # ok 는 "임박한 것을 찾았는가" 가 아니라 **"살펴볼 것이 있었는가"** 다.
+        # 냉장고가 신선하면 임박한 것이 0건인 게 정상이고, 그것도 유효한 결론이다.
+        # 전에는 bool(scored) 였는데, 그 탓에 재료가 전부 여유로운 가구에서
+        # 파이프라인이 1단계에서 멈추고도 "가전 7단계 · 개입 0회" 로 보고됐다.
+        # 아무것도 못 본 경우(items 가 비었음)만 실패로 본다.
+        if not items:
+            ev.append("살펴볼 항목이 없다 — 보관 목록이 비어 있다")
+        return SkillResult(bool(items), {"urgent": scored, "count": len(scored),
+                                         "expired": expired}, ev)
 
 
 class MenuSkill(Skill):

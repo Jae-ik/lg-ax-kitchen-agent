@@ -301,7 +301,16 @@ class ExperienceVerifySkill(Skill):
         # 장면마다 그것을 일으킨 스킬이 실제로 성공했는지 대조한다.
         # 시나리오는 그림이고 실행 로그는 사실이다. 둘이 어긋나면 설계가 틀린 것이다.
         m = result.get("metrics", {})
-        by_skill = {r["skill"]: r for r in result.get("log", [])}
+        log = result.get("log", [])
+        by_skill = {r["skill"]: r for r in log}
+        planned = [t.skill for t in plan.steps]
+        # 계획에 있는데 로그에 없는 단계 = 도달하지 못한 단계
+        not_run = [n for n in planned if n not in by_skill]
+        failed = [r["skill"] for r in log if not r.get("ok")]
+        halted_at = failed[0] if failed else (log[-1]["skill"] if log else "시작 전")
+        if not_run:
+            ev.append(f"실행이 {halted_at} 에서 멈춰 "
+                      f"{len(not_run)}단계에 도달하지 못했다: {', '.join(not_run)}")
         beats = scenario.get("beats", [])
         checked, unmet = [], []
         for b in beats:
@@ -314,7 +323,13 @@ class ExperienceVerifySkill(Skill):
             any_of = b.get("expect_any") or ([want] if want else [])
             found = [k for k in any_of if k in m]
             if row is None:
-                hit, why = False, f"{need} 이 계획에 없다"
+                # 계획에 아예 없는 것과, 계획에는 있는데 **앞 단계에서 멈춰
+                # 도달하지 못한 것**은 다르다. 전에는 둘 다 "계획에 없다" 로
+                # 보고해, 1단계에서 멈춘 실행이 "설계가 그 단계를 안 넣었다" 처럼
+                # 읽혔다.
+                hit = False
+                why = (f"{need} 까지 가지 못했다 — {halted_at} 에서 실행이 멈췄다"
+                       if need in planned else f"{need} 이 계획에 없다")
             elif not row["ok"]:
                 hit, why = False, f"{need} 실행 실패"
             elif any_of and not found:
@@ -344,12 +359,18 @@ class ExperienceVerifySkill(Skill):
         ev.append(f"장면 {len(beats)}개 중 {len(beats) - len(unmet)}개 달성 → "
                   + ("시나리오 달성" if ok else "시나리오 미달성"))
 
-        saved = max(0, touch_baseline - touches)
+        # 중단된 실행에서 개입이 0인 것은 수고를 덜어서가 아니라 **거기까지
+        # 가지도 못해서**다. 그것을 절감으로 세면 실패가 성과로 집계된다.
+        saved = 0 if not_run else max(0, touch_baseline - touches)
         return SkillResult(ok, {
             "verified": ok,
             "user_touches": touches,
             "touch_baseline": touch_baseline,
             "touches_removed": saved,
+            "steps_planned": len(planned),
+            "steps_run": len(log),
+            "not_run": not_run,
+            "halted_at": halted_at if not_run else None,
             "beats_total": len(beats),
             "beats_met": len(beats) - len(unmet),
             "unmet": unmet,

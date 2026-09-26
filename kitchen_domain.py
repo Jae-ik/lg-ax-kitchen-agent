@@ -752,6 +752,8 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["폐기 대상"] = ctx["expired_note"]
         if ctx.get("delivery_note"):
             metrics["조달 대기"] = ctx["delivery_note"]
+        elif "procure" in {r["skill"] for r in log}:
+            metrics["조달 대기"] = "조달 불필요 — 필요한 것이 이미 다 있다"
         if ctx.get("reheated"):
             metrics["재가열"] = ctx["reheated"]
         if ctx.get("recovered"):
@@ -834,6 +836,16 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["확인 요청"] = [c["name"] + " — " + c["reason"]
                                  for c in ctx["need_confirm"]]
         metrics["메뉴"] = ctx.get("menu_name", "-")
+        if not ctx.get("record"):
+            # 조용히 None 으로 끝내면 "메뉴를 못 골랐다" 가 결과에 안 남아,
+            # 실패가 지표 없음으로 보인다. 왜 못 골랐는지까지 적는다.
+            have = [x["name"] for x in K.fridge_list_items()]
+            metrics["메뉴 없음"] = (
+                f"지금 있는 것({', '.join(have[:6])}{'…' if len(have) > 6 else ''})으로 "
+                f"만들 수 있는 기록이 후보 {ctx.get('recipe_stats', {}).get('후보', 0)}건 "
+                f"중에 없다"
+                + ("" if "procure" in {r["skill"] for r in log}
+                   else " — 제때 오는 조달도 없어 장보기 단계가 계획에서 빠졌다"))
         if ctx.get("record"):
             metrics["사용한 기록"] = ctx["record"].get("record_id")
             metrics["목표 질량비"] = ctx["record"].get("target_mass_ratio")
