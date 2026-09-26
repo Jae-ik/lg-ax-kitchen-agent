@@ -25,6 +25,8 @@ python check_interlock.py       # 스킬 절단 실험 — 각 단계가 뒤에 
 python check_generalize.py      # 설계하지 않은 상황 5종에서도 이유를 남기고 끝나는가
 python check_skills.py          # 스킬 11종 단독 — 순수성·경계값·근거·정직성·격리·계약
 python check_reuse.py           # reusable_for 가 말뿐인지 — 주방 밖 8개 대상에 실제 적용
+python check_planner.py         # 순서를 정말 계산하는가 — 결정성·최소성·순환·한계
+python check_physics.py         # 무작위 조작으로 질량·온도·단조·비가역 불변량 확인
 ```
 
 API 키가 없어도 전부 동작한다. 계획은 LLM이 아니라 **전제조건 플래너**가 계산한다.
@@ -52,6 +54,8 @@ check_regression.py  scenarios.json 이 기대값과 같은지 (실행 단계별
 check_consistency.py 선언·물리·문서·맞물림·주장 11항목 검사
 check_interlock.py   스킬 9단계를 하나씩 교란해 뒤 단계가 실제로 달라지는지 확인
 check_generalize.py  페르소나에 없는 상황 5종(빈 냉장고·전부 신선·10분·용량 초과·빈 목록)
+check_planner.py     플래너 단독 10항목 (뒤섞기 60회·최소성·순환·경합·구조적 한계)
+check_physics.py     조리기·건조기를 무작위 조작 60회씩 돌리며 매 스텝 불변량 확인
 check_reuse.py       주방과 상관없는 8개 대상(의약품·제습기·에어컨·로봇청소기 등)에
                      스킬을 코드 수정 없이 붙여 본다. 미확인 선언 17건도 함께 출력
 check_skills.py      스킬 11종을 파이프라인 밖에서 단독 호출해 39개 항목 확인

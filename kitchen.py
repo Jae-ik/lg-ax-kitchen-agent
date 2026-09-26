@@ -347,6 +347,18 @@ class Cooker:
         """
         return max(0.0, self.mass_g - self.solid_g - self.absorbed_g)
 
+    def _set_temp(self, t: float):
+        """온도를 바꾸는 **유일한 자리.** 최고 온도를 함께 갱신한다.
+
+        전에는 tick 안에서만 최고 온도를 올렸다. 그래서 뜨거운 것을 부어
+        온도가 오르면 `peak_temp_c < temp_c` 가 됐다 — 익힘 판정과 기록
+        저장이 그 값을 쓰는데 뒤처진 값이 들어갔다.
+        (2026-09-26 "같은 물리를 두 곳에서 다르게 다뤘다" 와 같은 부류라
+         아예 한 자리로 모은다.)
+        """
+        self.temp_c = t
+        self.peak_temp_c = max(self.peak_temp_c, t)
+
     def skim(self, grams: float, what: str = "거품"):
         """거품·기름을 걷어낸다. 질량이 주는데 이것은 증발이 아니다."""
         if not self.running or grams <= 0:
@@ -378,7 +390,7 @@ class Cooker:
         # 하면서 물만 빠뜨리고 있었다 — 같은 물리인데 한쪽만 구현돼 있었다.
         before_t = self.temp_c
         total = self.mass_g + grams
-        self.temp_c = (self.mass_g * self.temp_c + grams * temp_c) / total
+        self._set_temp((self.mass_g * self.temp_c + grams * temp_c) / total)
         self.mass_g = total
         self.watered_g += grams
         return {"grams": round(grams, 1), "mass_g": round(self.mass_g, 1),
@@ -416,7 +428,9 @@ class Cooker:
         self.extra_water_g = extra_water_g
         # 냉장고에서 갓 꺼낸 재료는 20도가 아니다. 출발 온도가 낮으면
         # 끓기까지 더 걸리고, 그만큼 조리 시간이 길어진다.
-        self.temp_c = start_temp_c
+        # 출발 온도가 20도를 넘을 수도 있으므로 최고 온도도 함께 맞춘다.
+        self.peak_temp_c = start_temp_c
+        self._set_temp(start_temp_c)
         self.power = power
         self.soil = 0.0
         self.added_g = 0.0
@@ -454,7 +468,7 @@ class Cooker:
             if self.temp_c + dT > self.BOIL_C:
                 # 끓는점까지 올리고 남은 열은 증발에 쓰인다
                 used = (self.BOIL_C - self.temp_c) * heat_cap
-                self.temp_c = self.BOIL_C
+                self._set_temp(self.BOIL_C)
                 evap_boil = max(0.0, p_net * sec - used) / self.LATENT_J_PER_G
             else:
                 self.temp_c += dT
@@ -607,7 +621,7 @@ class Cooker:
         before_t = self.temp_c
         # 섞인 뒤 온도 = 질량가중 평균 (비열은 같다고 본다 — 물 기준 근사)
         total = self.mass_g + grams
-        self.temp_c = (self.mass_g * self.temp_c + grams * temp_c) / total
+        self._set_temp((self.mass_g * self.temp_c + grams * temp_c) / total)
         self.mass_g = total
         self.initial_mass_g += grams          # 졸임 비율의 분모도 늘린다
         self.added_g += grams
