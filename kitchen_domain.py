@@ -183,6 +183,19 @@ KNOWN_ITEMS = ["두부", "대파", "간장", "된장", "닭고기", "양파", "�
 AUTO_LIMIT_KRW = 15000                                # 1회 자동 주문 상한
 
 
+def domain_goal(constraints: dict) -> set:
+    """이 도메인에서 "끝났다" 는 무엇인가.
+
+    설계 층 스킬(flow_design)은 'cooked' 라는 이름을 모른다. 도메인이
+    알려 준다. 세탁실 도메인 파일을 쓰면 여기서 {'dried', 'folded'} 를
+    돌려주면 되고, 설계 층은 한 줄도 바뀌지 않는다.
+    """
+    goal = {"cooked"}
+    if constraints.get("finish_cleanup"):
+        goal.add("cleaned")
+    return goal
+
+
 def build_tasks(constraints: dict) -> list:
     """상황에서 나온 제약을 반영해 이 도메인의 작업 목록을 만든다."""
     avoid = list(constraints.get("avoid", []))

@@ -166,7 +166,11 @@ class PrepSkill(Skill):
                    "다른 출발점에서 쫓게 된다.")
     input_schema = {
         "record": "dict                   조리 기록",
-        "weigh": "(name, qty_g) -> dict   계량 함수. 주입받는다",
+        # 주입 함수의 **반환 키**까지가 계약이다. 적어 두지 않으면 다른
+        # 도메인에서 쓰려는 사람이 소스를 읽어야 한다.
+        "weigh": "(name, qty_g) -> dict   계량 함수. 주입받는다. "
+                 "성공 {ok:True, actual_g, target_g, expected_extra_water_g, "
+                 "short_g?, attempted_g?} / 실패 {ok:False, reason}",
         "available": "(name) -> bool      재고 확인 함수. 주입받는다",
         "min_fill_ratio": "float          목표의 이 비율도 못 담으면 넘기지 않는다",
         "absorb_of": "(재료들) -> float   빨아들일 물의 양. 그만큼 더 붓는다",
@@ -195,6 +199,14 @@ class PrepSkill(Skill):
                 missing.append(ing["name"])
                 ev.append(f"{ing['name']}: {w.get('reason')}")
                 continue
+            # 계약을 안 지킨 주입 함수는 KeyError 한 줄이 아니라 **무엇이
+            # 빠졌는지** 로 알려준다. 재사용하는 쪽이 소스를 읽지 않고도
+            # 고칠 수 있어야 한다. 첫 키 접근보다 먼저 확인한다.
+            for k in ("actual_g", "target_g", "expected_extra_water_g"):
+                if k not in w:
+                    raise KeyError(
+                        f"weigh() 가 '{k}' 를 돌려주지 않았다 — prep 의 "
+                        f"input_schema 에 적힌 계약을 확인하라. 받은 키: {sorted(w)}")
             # 목표의 절반도 못 담았으면 그 메뉴가 아니다. 배추 20g 으로
             # 200g 짜리 된장찌개를 시작하면 조리 단계는 그대로 성공을 보고한다.
             # menu 가 수량까지 보므로 정상 경로에서는 여기까지 오지 않지만,
@@ -274,7 +286,13 @@ class PrepSkill(Skill):
             ev.append("재고가 모자라 목표보다 적게 담은 재료: "
                       + ", ".join(f"{k} {v}g" for k, v in short.items())
                       + " — 조리 목표를 그만큼 낮춰 잡아야 한다")
-        return SkillResult(not missing,
+        # 계량할 재료가 아예 없으면 missing 도 0건이라 `not missing` 이 참이
+        # 된다 — 아무것도 안 했는데 성공이다. "할 일이 없었다" 와 "해냈다" 는
+        # 다르다(inventory 에서 같은 자리를 반대 방향으로 틀렸었다).
+        want = record.get("ingredients") or []
+        if not want:
+            ev.append("계량할 재료가 없다 — 기록에 재료 목록이 비어 있다")
+        return SkillResult(bool(want) and not missing,
                            {"total_mass_g": round(total, 1),
                             "extra_water_g": round(extra, 1),
                             "recovery": (f"계량하지 못한 재료 {len(missing)}건: "

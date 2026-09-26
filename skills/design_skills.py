@@ -112,8 +112,17 @@ class SituationReadSkill(Skill):
                              "source": "상황 추론(알레르기)"})
 
         ev.append(f"수고 지점 {len(friction)}건 확정")
-        return SkillResult(True, {"friction": friction, "constraints": constraints,
-                                  "need_min": need_min, "budget_min": budget}, ev)
+        # 덜어낼 수고가 하나도 없으면 이 에이전트를 부를 이유가 없다. 제약은
+        # 읽었지만 **할 일을 찾지 못한 것**이므로 성공으로 세지 않는다.
+        # (inventory 의 "임박한 것 0건" 과는 다르다 — 그건 뒤 단계가 그대로
+        #  쓸 수 있는 유효한 결론이지만, 여기서 0건이면 뒤가 전부 무의미하다.
+        #  scenario_draft 는 2026-09-25 에 같은 이유로 이미 고쳤다.)
+        if not friction:
+            ev.append("덜어낼 수고를 찾지 못했다 — 고객이 보고한 불편도 없고 "
+                      "상황에서 읽히는 것도 없다")
+        return SkillResult(bool(friction),
+                           {"friction": friction, "constraints": constraints,
+                            "need_min": need_min, "budget_min": budget}, ev)
 
 
 # ════════════════════ 02 시나리오 작성 ════════════════════
@@ -239,7 +248,10 @@ class FlowDesignSkill(Skill):
                    "계산한다. 순서를 적어두지 않고 전제조건에서 계산하므로 "
                    "상황이 바뀌면 순서도 바뀐다.")
     input_schema = {
-        "constraints": "dict",
+        "constraints": "dict   도메인 제약. goal_facts 로 목표를 줘도 된다",
+        "goal": "set[str] | None   이 도메인에서 '끝났다' 는 사실들. "
+                "주방이면 {cooked, cleaned}, 세탁실이면 {dried, ...}. "
+                "**스킬은 도메인 사실 이름을 모른다** — 반드시 주입받는다",
         "tasks": "list[Task]  이 도메인에서 쓸 수 있는 작업",
         "planner": "(goal, tasks, known) -> Plan   주입받는다",
     }
@@ -247,10 +259,18 @@ class FlowDesignSkill(Skill):
     requires = ("scenario", "constraints")
     provides = ("flow",)
 
-    def run(self, constraints: dict, tasks: list, planner: Callable, **_) -> SkillResult:
-        goal = {"cooked"}
-        if constraints.get("finish_cleanup"):
-            goal.add("cleaned")
+    def run(self, constraints: dict, tasks: list, planner: Callable,
+            goal: list | set | None = None, **_) -> SkillResult:
+        # 목표 사실은 **도메인이 정한다.** 전에는 {"cooked"} 가 이 스킬 안에
+        # 하드코딩돼 있었다. 설계 층 스킬이 주방 도메인의 사실 이름을 알고
+        # 있었다는 뜻이고, 세탁실에 쓰려면 이 줄을 고쳐야 했다 —
+        # "kitchen_domain.py 만 바꾸면 된다" 는 설명과 어긋난다.
+        goal = set(goal or constraints.get("goal_facts") or ())
+        if not goal:
+            raise ValueError(
+                "flow_design: 목표 사실이 없다. goal=... 로 넘기거나 "
+                "constraints['goal_facts'] 에 적어라 "
+                "(예: {'cooked', 'cleaned'} / 세탁실이면 {'dried'})")
 
         # 조달을 건너뛰기로 했으면 '재고가 갖춰졌다' 를 이미 성립한 사실로 둔다.
         # 그러면 플래너가 procure 를 계획에서 자동으로 뺀다.

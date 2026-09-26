@@ -243,6 +243,11 @@ class ConvergeSkill(Skill):
                         f"목표 {target} 을 {over} 만큼 지나쳤다 "
                         f"(허용 {tolerance}) — 도달로 세지 않는다. "
                         f"양이 적어 한 주기 안에 넘어간 것으로 본다")
+                # **성공 경로에서도** 액추에이터를 끈다. 실패 경로만 고쳐
+                # 두었더니, 목표에 닿고 돌아갈 때 세기가 그대로 남았다.
+                # 조리기·건조기는 호출자가 stop() 을 불러 가려져 있었지만,
+                # 그 호출을 잊는 기기에서는 계속 가열된다.
+                actuate(0)
                 return SkillResult(ok, {
                     "reached": ok, "observations": i,
                     "steps": round(elapsed, 2),
@@ -318,6 +323,19 @@ class ConvergeSkill(Skill):
                 p = min(cap, (s.get(power_key) or 0) + 1)
                 actuate(p)
                 evidence.append(f"  ↑ {ready_key}={s.get(ready_key):.1f} < {ready_at} → 세기 {p}")
+                continue
+            # **아무 진행이 없으면** 세기를 올린다.
+            #
+            # 진행이 0 이면 속도가 0 이라 ETA 를 낼 수 없다(None). 그런데
+            # 세기를 올리는 경로가 "ready 미달" 과 "ETA 가 길다" 둘뿐이라,
+            # ready_key 를 주지 않은 기기에서는 제어기가 **시동조차 걸지
+            # 못했다** — 화력 0 인 채로 상한까지 돌았다.
+            # 조리기·건조기는 ready_key 가 있어 이 구멍이 가려져 있었다.
+            # 선언상 ready_key 는 선택 인자이므로, 없어도 굴러가야 한다.
+            if eta is None and (s.get(power_key) or 0) < cap:
+                p = (s.get(power_key) or 0) + 1
+                actuate(p)
+                evidence.append(f"  ↑ 아직 진행이 없다 → 세기 {p}")
                 continue
             # 끓는데도 너무 느리면 세기를 올린다
             if eta is not None and eta > 6 and (s.get(power_key) or 0) < cap:

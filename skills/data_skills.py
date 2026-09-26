@@ -19,8 +19,14 @@ class RecipeSourceSkill(Skill):
                    "기피·알레르기 재료는 구조화된 재료 목록이 아니라 원문 전체에서 "
                    "찾는다 — 수량 표기가 없어 파싱되지 않은 재료도 놓치지 않기 위해서다.")
     input_schema = {
-        "load": "() -> dict   자료 적재 함수(캐시 또는 API). 주입받는다",
-        "match": "(text, keywords) -> list[str]   원문 검사 함수. 주입받는다",
+        # 주입 함수는 **반환 형태까지** 계약이다. 여기에 안 적으면 다른
+        # 도메인에서 이 스킬을 쓰려는 사람이 소스를 읽어야 한다 — 그건
+        # 재사용이 아니다.
+        "load": "() -> {recipes: list[dict], source: str, key_used: str}   "
+                "자료 적재 함수(캐시 또는 API). 주입받는다. recipes 의 각 항목은 "
+                "menu(str) 가 필수이고 parts_raw/method/sodium_mg 는 있으면 쓴다",
+        "match": "(원문 str, 키워드 list[str]) -> list[str]   원문에서 걸린 "
+                 "키워드들을 돌려준다. 빈 리스트면 통과. 주입받는다",
         "avoid": "list[str]   기피·알레르기 재료",
         "max_sodium_mg": "float | None   1인분 나트륨 상한",
         "methods": "list[str] | None   허용 조리법 (예: 끓이기)",

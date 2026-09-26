@@ -17,8 +17,8 @@ import sys
 
 import kitchen as K
 import personas
-from kitchen_domain import (build_tasks, make_executor, pantry_stock,
-                            pantry_refill)
+from kitchen_domain import (build_tasks, domain_goal, make_executor,
+                            pantry_stock, pantry_refill)
 from planner import Task, plan as make_plan
 from skills import REGISTRY
 from orchestrator import Trace, banner, W
@@ -61,7 +61,9 @@ def build_design_tasks(ctx_seed: dict) -> list:
              provides=("flow",),
              bind=lambda c: {"constraints": c["constraints"],
                              "tasks": build_tasks(c["constraints"]),
-                             "planner": make_plan},
+                             "planner": make_plan,
+                             # 무엇이 "끝났다" 인지는 도메인이 안다.
+                             "goal": domain_goal(c["constraints"])},
              absorb=lambda c, o: c.update(flow=o["flow"], exec_plan=o["plan"]),
              note="시나리오를 실현할 가전 작업 순서를 계산한다"),
         Task(skill="experience_verify", requires=("flow", "scenario"),
