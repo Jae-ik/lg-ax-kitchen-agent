@@ -404,6 +404,73 @@ def c12():
     return chr(10).join(bad)
 
 
+@check("제안서(HWP)의 수치 주장이 실행 결과와 같은가")
+def c13():
+    """문서(.md)는 대조해 왔지만 **정작 제출하는 제안서는 대조한 적이 없었다.**
+    실제로 여열 잠열을 반영하고 상수를 재보정한 뒤, 제안서에 적힌
+    "목표 0.78의 양옆 0.005 안" 이 실제 -0.0099~+0.0002 로 어긋나 있었다.
+
+    PDF 에서 문자열을 찾는 방식이라 문장 구조는 못 보지만, 숫자가
+    낡는 것은 잡는다. PyMuPDF 가 없으면 건너뛴다(없는 것이 실패는 아니다).
+    """
+    import glob
+    import json
+    import os
+    try:
+        import fitz
+    except ImportError:
+        return ""
+    import re as _re
+    pdfs = glob.glob("../LG_AX해커톤_제안서_v*.pdf")
+    if not pdfs:
+        return ""
+    # 문자열 정렬이면 v9 가 v17 보다 뒤로 간다. 번호로 정렬한다.
+    def _ver(path):
+        m = _re.search(r"_v(\d+)", os.path.basename(path))
+        return int(m.group(1)) if m else -1
+    latest = max(pdfs, key=_ver)
+    text = chr(10).join(pg.get_text() for pg in fitz.open(latest))
+
+    cv = json.load(io.open("variance.json", encoding="utf-8"))["converge"]
+    rows = {r["persona"]: r for r in
+            json.load(io.open("scenarios.json", encoding="utf-8"))}
+    m3 = rows["p3_알레르기"]["verify"]["metrics"]
+
+    lo, hi = cv["cooker_final"]["min"], cv["cooker_final"]["max"]
+    dlo, dhi = lo - 0.78, hi - 0.78
+    watch = []
+    for pid in rows:
+        mm = rows[pid]["verify"]["metrics"]
+        heat = mm.get("가열 시간(분)")
+        hands = mm.get("손이 가는 일", "")
+        n = int(str(hands).split("회")[0]) if "회" in str(hands) else None
+        if heat and n:
+            watch.append(n / heat)
+
+    need = [
+        (f"{lo}~{hi}", "200회 질량비 범위"),
+        (f"{cv['dryer_final']['min']}~{cv['dryer_final']['max']}",
+         "200회 함수율 범위"),
+        (f"{dlo:+.3f}~{dhi:+.3f}".replace("+0.000", "+0.000"),
+         "목표 대비 범위"),
+        (str(m3.get("자료 선별", "")).split("후보 ")[-1].split("건")[0] + "건",
+         "자료 선별 후보 수"),
+    ]
+    bad = [f"제안서({os.path.basename(latest)})에 '{v}'({why})가 없다"
+           for v, why in need if v not in text]
+    if watch:
+        lo_w, hi_w = min(watch) * 100, max(watch) * 100
+        # 문서는 반올림해 적으므로 ±1%p 는 허용한다
+        import re
+        mm = re.search(r"(\d+)~(\d+)%", text)
+        if mm:
+            a, b = int(mm.group(1)), int(mm.group(2))
+            if not (abs(a - lo_w) <= 1.5 and abs(b - hi_w) <= 1.5):
+                bad.append(f"지켜보는 비율: 제안서 {a}~{b}% / 실측 "
+                           f"{lo_w:.1f}~{hi_w:.1f}%")
+    return chr(10).join(bad)
+
+
 def main():
     print("=" * 78)
     print("일관성 검사 — 기계가 확인할 수 있는 것만")
