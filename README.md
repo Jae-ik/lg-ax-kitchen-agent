@@ -19,6 +19,9 @@ python run_demo.py              # 실행 층만 단독 — 스킬 재사용 실�
 python run_repeat.py            # 같은 상황 두 번 — 기록이 다음 목표가 되는지
 python run_share.py             # 본가 기록을 자취방·원룸 기기로 이식
 python stress_test.py           # 일부러 망가뜨린 입력 19건
+python check_all.py             # ← 전부 돌린다. 실패하면 무엇부터 볼지 알려준다
+python check_all.py --fast      #   분산 측정(200회)을 건너뛴다
+
 python check_regression.py      # scenarios.json 회귀 검사
 python check_consistency.py     # 선언·물리·문서·맞물림·주장 11항목 검사
 python check_interlock.py       # 스킬 절단 실험 — 각 단계가 뒤에 실제로 영향을 주는가
@@ -52,6 +55,7 @@ fetch_data.py        공개 자료 수집 (식약처 레시피 DB) → data/reci
 recipe_parse.py      재료 문자열 파싱 (표기 두 종류 처리)
 kitchen.py / dryer.py  기기 시뮬레이터 (ThinQ Connect API 로 교체 가능)
                      열 모델은 열량 수지 — 투입·방열·잠열로 계산한다
+check_all.py         전부 돌리는 진입점. 실패하면 무엇부터 볼지 순서를 출력한다
 check_regression.py  scenarios.json 이 기대값과 같은지 (실행 단계별 ok 까지)
 check_consistency.py 선언·물리·문서·맞물림·주장 11항목 검사
 check_interlock.py   스킬 9단계를 하나씩 교란해 뒤 단계가 실제로 달라지는지 확인
@@ -317,6 +321,34 @@ python measure_variance.py 500 200   # → variance.json
 관측 주기를 1분 고정에서 **목표까지 남은 시간에 맞춰 줄이도록** 바꾸고
 (ETA 를 1.4배 보수적으로 본다 — 졸이기는 가속하기 때문이다),
 지나치는 폭이 0.0505 → 0.0082 로 줄었다.
+
+## 검사가 깨지면 무엇을 하는가
+
+검사를 만들어 두는 것과 **깨졌을 때 옳게 대처하는 것**은 다른 문제다.
+가장 쉬운 길은 늘 기대값을 고쳐 통과시키는 것이고, 그러면 검사는
+통과하지만 아무것도 지키지 않는다.
+
+하루 동안 실패 네 건에 서로 다른 대처를 했다. 그 기록을 남겨 둔다.
+
+| 실패한 것 | 원인 | 한 일 |
+|---|---|---|
+| `check_physics` 질량 수지 41건 | **검사 식이 틀림** (skim 이 분모도 줄이는 것을 몰랐다) | 검사를 고침 |
+| `check_cooking` 익힘·표류 | **시험 설계가 틀림** (포화 상태에서 잼 / 방어를 우회함) | 시험을 다시 짬 |
+| `check_consistency` 문서 수치 | 코드를 고쳐 값이 바뀜 | 문서를 갱신 |
+| `check_sensitivity` STIR_RELIEF | 가정값이 실제로 결과를 지배 | **기준을 완화**하고 한계로 등록 |
+
+**넷 중 둘은 코드가 아니라 내 검사가 틀린 것이었다.** 그래서 순서를 정한다.
+
+```
+1. 내 검사·시험이 틀렸는가      ← 가장 먼저 (실제로 하루에 세 번)
+2. 산출물이 낡았는가            ← run_design.py 부터 다시
+3. 코드가 틀렸는가              ← 고친다
+4. 기준이 낡았는가              ← 그 기준을 정한 설정이 바뀌었는지 확인 후에만
+5. 한계로 등록                  ← 위 넷이 아닐 때만, 무엇이 뒤집히는지 수치로 적는다
+```
+
+`check_all.py` 가 실패한 검사마다 이 순서를 출력한다. 기준을 바꿨으면
+**왜 바꿔도 되는지 주석에 남긴다 — 남길 수 없으면 아직 원인을 모르는 것이다.**
 
 ## 어느 상수가 결과를 지배하는가 — 민감도
 
