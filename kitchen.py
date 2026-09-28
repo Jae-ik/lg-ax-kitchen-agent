@@ -307,6 +307,15 @@ class Cooker:
     # 익힘 기준(60도)을 그대로 쓰다가 2kg 짜리에서 **6분까지 흡수가 0** 이었다.
     ABSORB_BASE_C: float = 40.0
     STIR_RELIEF: float = 0.55         # 저으면 그 뒤 눌어붙음이 이 비율로 준다
+    # **이 값은 실측이 아니다.** 공개 문헌에서 가정 조리 조건에 맞는
+    # 정량 데이터를 찾지 못했다(열교환기 fouling 연구는 유속과 부착의
+    # 관계를 정성적으로만 말하고, 조건도 다르다).
+    #
+    # 모르는 것을 아는 척하는 대신 **불확실하다는 사실을 값에 싣는다.**
+    # 교반이 줄인 몫에 이 폭을 곱해 눌어붙음 추정의 표준편차에 더하고,
+    # 세척 코스는 그 분포로 기대 비용을 최소화해 고른다. 그러면 상수가
+    # 얼마쯤 틀려도 코스가 경계에서 뒤집히지 않는다.
+    STIR_RELIEF_UNCERTAINTY: float = 0.20
     COOK_BASE_C: float = 60.0         # 이 온도 위에서만 익는다
 
     # ── 열 모델 ──────────────────────────────────────────────────────
@@ -342,6 +351,8 @@ class Cooker:
     BOIL_C: float = 100.0
     AMBIENT_C: float = 20.0
     peak_temp_c: float = 0.0
+    # 교반으로 덜어낸 눌어붙음 누적 — 불확실성 계산에 쓴다
+    soil_stir_saved: float = 0.0
     log: list = field(default_factory=list)
 
     def overflow_risk(self) -> float:
@@ -457,6 +468,7 @@ class Cooker:
         self._set_temp(start_temp_c)
         self.power = power
         self.soil = 0.0
+        self.soil_stir_saved = 0.0
         self.added_g = 0.0
         self.absorbed_g = 0.0
         self.skimmed_g = 0.0
@@ -549,8 +561,11 @@ class Cooker:
         # min(1.0, ...) 으로 자르면 긴 조리에서 **상한에 붙어 정보를 잃는다**
         # (24분짜리 삼계탕이 1.0 으로 포화해 흔들림도 0 이 됐다).
         # 1 - exp(-누적) 은 1 에 점근하되 닿지 않아 구분이 남는다.
-        self.soil += (boil * (0.30 + dryness) * (self.power / 5) * minutes
-                      * 0.30 * stir_factor)
+        raw_soil = boil * (0.30 + dryness) * (self.power / 5) * minutes * 0.30
+        self.soil += raw_soil * stir_factor
+        # 교반 덕에 덜어낸 몫. 이 몫이 STIR_RELIEF 에 걸려 있으므로,
+        # 그 상수가 틀린 만큼 눌어붙음 추정도 틀린다.
+        self.soil_stir_saved += raw_soil * (1.0 - stir_factor)
         self.peak_temp_c = max(self.peak_temp_c, self.temp_c)
 
         # 익힘. 제안서는 "익힘·졸임의 판단이 어려운" 사용자를 대상으로 적었는데
@@ -576,7 +591,12 @@ class Cooker:
                 # (평균 0.5286, 표준편차 0.0133).
                 # 점수의 흔들림. 누적의 상대 오차가 점수로 전달될 때
                 # 기울기 exp(-누적) 이 곱해진다.
-                "soil_sigma": round(self.soil * 0.025 * math.exp(-self.soil), 4),
+                # 회차 편차와 **교반 상수의 불확실성**을 함께 싣는다.
+                # 독립이라고 보고 제곱합의 제곱근으로 합친다.
+                "soil_sigma": round(math.sqrt(
+                    (self.soil * 0.025 * math.exp(-self.soil)) ** 2
+                    + (self.soil_stir_saved
+                       * self.STIR_RELIEF_UNCERTAINTY) ** 2), 4),
                 "added_g": round(self.added_g, 1),
                 "free_liquid_g": round(self.free_liquid_g(), 1),
                 "free_ratio": round(self.free_liquid_g() / self.mass_g, 3)
