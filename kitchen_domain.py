@@ -183,6 +183,99 @@ KNOWN_ITEMS = ["두부", "대파", "간장", "된장", "닭고기", "양파", "�
 AUTO_LIMIT_KRW = 15000                                # 1회 자동 주문 상한
 
 
+# 주방에서 쓰는 말. situation_read 의 근거 문장이 이 말을 쓴다.
+# 설계 층은 "조리량"·"세척" 같은 단어를 모른다.
+KITCHEN_TERMS = {"amount": "조리량", "finish": "세척",
+                 "finish_course": "세척 코스",
+                 "short_time": "시간이 모자란 상태에서 메뉴를 정하는 일",
+                 "avoid_check": "재료마다 못 먹는 것이 섞였는지 확인하는 일"}
+
+
+def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
+    """주방 도메인의 장면 목록.
+
+    `scenario_draft` 가 이 함수를 주입받는다. 설계 층 스킬은 "현관에
+    들어선다", "화력은 스스로 맞춘다" 같은 문장도, 그 장면을 검증할
+    스킬 이름(verified_by)도 모른다 — 전부 여기에 있다.
+
+    세탁실 도메인 파일을 쓰면 laundry_beats 를 만들어 주입하면 되고,
+    설계 층은 한 줄도 바뀌지 않는다.
+
+    plus: (시각, 분) -> 시각   시각 계산은 스킬이 준다
+    """
+    t0 = persona.get("arrive_home", "19:00")
+    beats = []
+
+    # verified_by: 이 장면이 실제로 일어났는지 확인할 실행 스킬.
+    # 검증 단계가 이 이름으로 실행 로그를 조회한다 — 그림과 실행을 잇는 고리다.
+    beats.append({
+        "at": t0, "user": "현관에 들어선다",
+        "system": "재고와 남은 시간을 이미 읽고 오늘 할 수 있는 것을 정해 둔다",
+        "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일",
+        "verified_by": "inventory", "expect_metric": "메뉴"})
+
+    if constraints.get("avoid"):
+        beats.append({
+            "at": plus(t0, 1), "user": "아무것도 확인하지 않는다",
+            "system": f"못 먹는 재료({', '.join(constraints['avoid'])})가 들어가는 "
+                      f"후보를 미리 제외한다",
+            "removes": "재료마다 못 먹는 것이 섞였는지 확인하는 일",
+            "verified_by": "menu", "expect_metric": "메뉴"})
+
+    if constraints.get("preorder"):
+        lv = persona.get("leave_office", t0)
+        beats.append({
+            "at": lv, "user": "사무실을 나선다",
+            "system": "냉장고와 양념 선반을 함께 확인해 부족한 것을 "
+                      "귀가 시각에 맞춰 주문한다",
+            "removes": "퇴근길에 장을 보러 들르는 일 / 집에 와서 뭐가 없는지 "
+                       "그제야 아는 일 / 양념이 떨어진 걸 조리 중에 발견하는 일",
+            "verified_by": "procure",
+            "expect_any": ["조달 대기", "확인 요청"]})
+
+    if constraints.get("skip_procurement"):
+        beats.append({
+            "at": plus(t0, 2), "user": "장을 보지 않는다",
+            "system": "시간이 모자라므로 지금 있는 재료만으로 가능한 것을 고른다",
+            "removes": "시간이 모자란 상태에서 메뉴를 정하는 일",
+            # 조달을 생략했다는 것은 '자동 주문' 이 결과에 없다는 뜻이다.
+            "verified_by": "menu", "expect_metric": "메뉴"})
+    elif not constraints.get("preorder"):
+        # 선제 주문이면 퇴근길 장면이 이미 조달을 덮는다 — 중복해서 넣지 않는다
+        beats.append({
+            "at": plus(t0, 2), "user": "주문을 누르지 않는다",
+            # 설계 시점에는 **자동 주문이 될지 확인이 필요할지 모른다.**
+            # "스스로 주문한다" 고만 적었다가, 둘 다 확인 요청이 된 상황에서
+            # 장면이 실제와 어긋났다. 판단 기준을 말하고 결과는 열어 둔다.
+            "system": "부족분을 이력·상한·안전 기준으로 판단해 "
+                      "되는 것은 주문하고, 안 되는 것만 묻는다",
+            "removes": "누가 장을 볼지 매번 정하는 일",
+            "verified_by": "procure",
+            "expect_any": ["조달 대기", "확인 요청"]})
+
+    beats.append({
+        # "불 앞을 지키지 않는다" 는 과장이었다. 재료를 넣고 뚜껑을
+        # 여닫고 젓는 것은 여전히 사람이 한다(제안서 표1). 달라지는 것은
+        # **언제 해야 하는지 몰라 계속 지켜보던 일**이 없어진다는 점이다.
+        "at": plus(t0, 5), "user": "부를 때만 손을 댄다",
+        "system": ("화력은 스스로 맞추고 목표 상태에 닿으면 멈춘다. "
+                   "손이 필요한 때(재료 투입·뚜껑·젓기)만 알려 준다"),
+        "removes": "조리 중 냄비 앞을 떠나지 못하는 일",
+        "verified_by": "converge", "expect_metric": "가열 시간(분)"})
+
+    if constraints.get("finish_cleanup"):
+        quiet = constraints.get("quiet_after")
+        beats.append({
+            "at": plus(t0, 45), "user": "코스를 고르지 않는다",
+            "system": "조리기가 잰 눌어붙음 정도로 코스를 정하고"
+                      + (f", {quiet} 이후까지 돌면 저소음으로 바꾼다"
+                         if quiet else " 바로 시작한다"),
+            "removes": "먹고 나서 설거지를 미루는 일 / 세척기를 언제 돌릴지 정하는 일",
+            "verified_by": "aftercare", "expect_metric": "세척 코스"})
+
+    return beats
+
+
 def domain_goal(constraints: dict) -> set:
     """이 도메인에서 "끝났다" 는 무엇인가.
 

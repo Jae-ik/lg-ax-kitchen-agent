@@ -39,15 +39,22 @@ _STOCK = [{"name": "배추", "qty_g": 300, "stored_days": 5, "shelf_life_days": 
           {"name": "두부", "qty_g": 200, "stored_days": 2, "shelf_life_days": 5}]
 
 
-# procure 는 제안을 **속성 접근**(o.delivery_min)으로 읽는다. dict 를 주면
-# deadline_min 경로에서 AttributeError 가 난다 — base.py 의 "스킬은 일반
-# 타입을 주고받는다" 와 어긋나는 유일한 자리다. 다른 도메인에 이 스킬을
-# 쓰려면 같은 속성을 가진 객체를 만들어 줘야 한다는 뜻이므로, 여기서는
-# 실제 자료형(store.Offer)을 그대로 써서 그 사실을 드러낸다.
+# procure 는 제안을 dict 로도 객체로도 받는다. 예전에는 속성 접근
+# (o.delivery_min)만 해서 dict 를 주면 AttributeError 가 났고, base.py 가
+# 선언한 "스킬은 일반 타입을 주고받는다" 와 어긋나는 유일한 자리였다.
+# 이제 둘 다 되므로 **둘 다** 시험한다.
 import store as _store
 
 
 def _lookup(name):
+    """일반 dict — 다른 도메인에서 Offer 클래스 없이 쓰는 경우."""
+    return [{"item": name, "store": "가게", "price_krw": 3000,
+             "delivery_min": 20, "in_stock": True, "can_order": True,
+             "source": "시험"}]
+
+
+def _lookup_obj(name):
+    """도메인 객체 — 주방이 실제로 쓰는 형태."""
     return [_store.Offer(item=name, store="가게", price_krw=3000,
                          delivery_min=20, in_stock=True, can_order=True)]
 
@@ -114,8 +121,17 @@ def _design_cases():
     sr = REGISTRY.get("situation_read").run(persona=_PERSONA,
                                             stage_costs=_COSTS)
     fr, cons = sr.output["friction"], sr.output["constraints"]
+    # 장면은 도메인이 준다 — 스킬은 어떤 장면을 그릴지 모른다.
+    def _beats(persona, constraints, plus):
+        t0 = persona.get("arrive_home", "19:00")
+        return [{"at": t0, "user": "아무것도 안 한다",
+                 "system": "상태를 읽고 할 일을 정해 둔다",
+                 "removes": persona["friction_reported"][0],
+                 "verified_by": "inventory", "expect_metric": "메뉴"}]
+
     sd = REGISTRY.get("scenario_draft").run(persona=_PERSONA, friction=fr,
-                                            constraints=cons)
+                                            constraints=cons,
+                                            beats_for=_beats)
     scen = sd.output["scenario"]
 
     # 가짜 도메인: 두 단계짜리 작업 그래프
@@ -143,8 +159,10 @@ def _design_cases():
                           stage_costs=_COSTS),
         },
         "scenario_draft": {
-            "정상": dict(persona=_PERSONA, friction=fr, constraints=cons),
-            "불편 0건": dict(persona=_PERSONA, friction=[], constraints=cons),
+            "정상": dict(persona=_PERSONA, friction=fr, constraints=cons,
+                       beats_for=_beats),
+            "불편 0건": dict(persona=_PERSONA, friction=[], constraints=cons,
+                          beats_for=_beats),
         },
         "flow_design": {
             "정상": dict(constraints={**cons, "goal_facts": ["done"]}, tasks=tasks,
@@ -232,6 +250,8 @@ CASES = {
                       auto_limit_krw=15000, deadline_min=0),
         "예산 0원": dict(missing=["대파"], lookup=_lookup, known_items=["대파"],
                       auto_limit_krw=0),
+        "도메인 객체로도": dict(missing=["대파"], lookup=_lookup_obj,
+                        known_items=["대파"], auto_limit_krw=15000),
     },
     "aftercare": {
         "정상": dict(soil_score=0.36),

@@ -132,22 +132,42 @@ def c9():
     return ok, f"{n}단계 사슬 {'정렬됨' if ok else got}"
 
 
-@check("한계: 같은 스킬을 두 번 쓰는 계획은 만들 수 없다")
+@check("같은 스킬을 계획에 여러 번 쓸 수 있다")
 def c10():
-    """`selected` 가 **스킬 이름**을 키로 쓴다. 그래서 한 스킬이 계획에
-    두 번 들어갈 수 없다 — 볶고 나서 다시 끓이는 식의 흐름은 지금 구조로
-    표현되지 않는다.
+    """볶고 나서 끓이는 요리처럼, 같은 능력을 단계마다 다른 목표로 쓰는
+    흐름은 실재한다.
 
-    이것은 버그가 아니라 **현재 설계의 경계**다. 다만 경계를 모른 채
-    "어떤 순서든 계산한다" 고 말하면 그게 거짓이 되므로 여기에 박아 둔다.
-    지금 도메인(주방·세탁)은 한 스킬을 한 번씩만 쓰므로 문제가 없다.
+    전에는 `selected` 가 **스킬 이름**을 키로 써서 한 스킬이 계획에 두 번
+    들어갈 수 없었다. 작업의 정체성을 (스킬, 만드는 사실)로 바꿔 풀었다.
+    두 converge 는 각각 'seared' 와 'stewed' 를 만들므로 다른 작업이다.
     """
-    tasks = [T("heat", ["seared"]), T("heat2", ["stewed"], ["seared"])]
-    got = _names(plan({"stewed"}, tasks))
-    # 서로 다른 이름으로 선언하면 두 번 쓸 수 있다는 것을 보인다
-    ok = got == ["heat", "heat2"]
-    return ok, ("같은 이름으로는 두 번 못 쓴다 — 다른 Task 이름으로 "
-                f"선언해야 한다 ({got})")
+    tasks = [T("prep", ["measured"]),
+             T("converge", ["seared"], ["measured"]),
+             T("converge", ["stewed"], ["seared"]),
+             T("aftercare", ["cleaned"], ["stewed"])]
+    base = None
+    for seed in range(40):
+        ts = list(tasks)
+        random.Random(seed).shuffle(ts)
+        got = [f"{t.skill}({t.provides[0]})" for t in plan({"cleaned"}, ts).steps]
+        if base is None:
+            base = got
+        elif got != base:
+            return False, f"시드 {seed} 에서 순서가 달라졌다: {base} → {got}"
+    want = ["prep(measured)", "converge(seared)", "converge(stewed)",
+            "aftercare(cleaned)"]
+    ok = base == want
+    return ok, f"{base} (40회 뒤섞어도 동일)"
+
+
+@check("같은 스킬·같은 사실이면 한 번만 넣는다")
+def c11():
+    """여러 번 쓸 수 있게 하면서 **중복까지 허용하면** 안 된다.
+    같은 사실을 만드는 같은 스킬은 한 번이면 족하다."""
+    tasks = [T("a", ["x"]), T("a", ["x"]), T("b", ["y"], ["x"])]
+    got = _names(plan({"y"}, tasks))
+    ok = got.count("a") == 1
+    return ok, f"계획 {got}"
 
 
 def main() -> int:

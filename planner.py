@@ -83,9 +83,14 @@ def plan(goal, tasks, known=()) -> Plan:
         if producer is None:
             unmet.add(fact)
             continue
-        if producer.skill in selected:
+        # **작업의 정체성은 스킬 이름이 아니라 (스킬, 만드는 사실)** 이다.
+        # 전에는 스킬 이름을 키로 써서 같은 스킬이 계획에 두 번 들어갈 수
+        # 없었다 — 볶고 나서 끓이는 요리처럼 같은 능력을 단계마다 다른
+        # 목표로 쓰는 흐름을 표현할 수 없었다는 뜻이다.
+        key = (producer.skill, tuple(sorted(producer.provides)))
+        if key in selected:
             continue
-        selected[producer.skill] = producer
+        selected[key] = producer
         why = producer.note or f"'{fact}' 을 만들기 위해"
         reasoning.append(f"{producer.skill} 선택 — {why}")
         for r in producer.requires:
@@ -103,8 +108,10 @@ def plan(goal, tasks, known=()) -> Plan:
         if not ready:
             stuck = [t.skill for t in remaining]
             raise PlanError(f"전제가 순환하거나 충족되지 않는다: {stuck}")
-        # 같은 단계에 여러 개가 준비되면 이름 순으로 고정 — 계획을 재현 가능하게
-        ready.sort(key=lambda t: t.skill)
+        # 같은 단계에 여러 개가 준비되면 정해진 순서로 고정 — 계획을
+        # 재현 가능하게. 같은 스킬이 둘 이상일 수 있으므로 만드는 사실까지
+        # 함께 본다(이름만으로는 둘을 구분하지 못한다).
+        ready.sort(key=lambda t: (t.skill, tuple(sorted(t.provides))))
         nxt = ready[0]
         ordered.append(nxt)
         done |= set(nxt.provides)

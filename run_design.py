@@ -17,8 +17,9 @@ import sys
 
 import kitchen as K
 import personas
-from kitchen_domain import (build_tasks, domain_goal, make_executor,
-                            pantry_stock, pantry_refill)
+from kitchen_domain import (KITCHEN_TERMS, build_tasks, domain_goal,
+                            kitchen_beats, make_executor, pantry_stock,
+                            pantry_refill)
 from planner import Task, plan as make_plan
 from skills import REGISTRY
 from orchestrator import Trace, banner, W
@@ -45,7 +46,8 @@ def build_design_tasks(ctx_seed: dict) -> list:
     """설계 직무 자체를 작업으로 선언한다. 순서는 플래너가 정한다."""
     return [
         Task(skill="situation_read", provides=("friction", "constraints"),
-             bind=lambda c: {"persona": c["persona"], "stage_costs": STAGE_COSTS},
+             bind=lambda c: {"persona": c["persona"], "stage_costs": STAGE_COSTS,
+                             "terms": KITCHEN_TERMS},
              absorb=lambda c, o: c["seed"].update(
                  time_budget_min=o["constraints"].get("time_budget_min")
              ) or c.update(friction=o["friction"],
@@ -54,7 +56,9 @@ def build_design_tasks(ctx_seed: dict) -> list:
         Task(skill="scenario_draft", requires=("friction", "constraints"),
              provides=("scenario",),
              bind=lambda c: {"persona": c["persona"], "friction": c["friction"],
-                             "constraints": c["constraints"]},
+                             "constraints": c["constraints"],
+                             # 어떤 장면을 그릴지는 도메인이 안다
+                             "beats_for": kitchen_beats},
              absorb=lambda c, o: c.update(scenario=o["scenario"]),
              note="수고가 사라진 하루를 먼저 그려야 설계 기준이 생긴다"),
         Task(skill="flow_design", requires=("scenario", "constraints"),

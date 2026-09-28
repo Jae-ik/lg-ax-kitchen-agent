@@ -318,7 +318,11 @@ class ProcureSkill(Skill):
                    "하나라도 걸리면 주문하지 않고 사용자 확인을 요청한다.")
     input_schema = {
         "missing": "list[str]",
-        "lookup": "(품목) -> list[Offer]   상점 조회 함수. 주입받는다",
+        # 반환 형태까지가 계약이다. **dict 도 객체도 받는다** — 다른
+        # 도메인에서 쓰려고 Offer 클래스를 따로 만들 필요가 없다.
+        "lookup": "(품목) -> list[dict|obj]   상점 조회 함수. 주입받는다. "
+                  "각 항목은 store·price_krw·delivery_min·can_order 를 갖고, "
+                  "source 는 있으면 쓴다",
         "known_items": "list[str]  이전에 산 적 있는 품목",
         # lookup 이 돌려주는 Offer 에 can_order 가 실려 온다. 주문까지 되는
         # 상점이 없으면 값이 얼마든 자동 주문하지 않는다.
@@ -350,20 +354,31 @@ class ProcureSkill(Skill):
                 ask.append({"name": name, "reason": "알레르기·기피 목록에 있음"})
                 ev.append(f"{name}: 안전 필터에 걸려 자동 주문 보류"); continue
 
+            # 제안(offer)은 **dict 로도 객체로도** 올 수 있다.
+            # 전에는 o.delivery_min 처럼 속성으로만 읽어, dict 를 주면
+            # AttributeError 가 났다 — base.py 가 선언한 "스킬은 도메인
+            # 객체가 아니라 일반 타입을 주고받는다" 와 어긋나는 유일한
+            # 자리였다. 다른 도메인에서 이 스킬을 쓰려면 같은 속성을 가진
+            # 클래스를 만들어야 했다는 뜻이다.
+            def g(o, key, default=None):
+                if isinstance(o, dict):
+                    return o.get(key, default)
+                return getattr(o, key, default)
+
             # 제때 도착하는 것만 남기고, 그중 가장 싼 것을 고른다
             fit = [o for o in offers
-                   if deadline_min is None or o.delivery_min <= deadline_min]
+                   if deadline_min is None or g(o, 'delivery_min') <= deadline_min]
             if not fit:
-                fastest = min(offers, key=lambda o: o.delivery_min)
+                fastest = min(offers, key=lambda o: g(o, 'delivery_min'))
                 ask.append({"name": name,
-                            "reason": f"가장 빠른 배송 {fastest.delivery_min}분 > "
+                            "reason": f"가장 빠른 배송 {g(fastest, 'delivery_min')}분 > "
                                       f"남은 {deadline_min}분"})
                 ev.append(f"{name}: 제때 도착하는 상점 없음 "
-                          f"(최속 {fastest.store} {fastest.delivery_min}분) → 확인 요청")
+                          f"(최속 {g(fastest, 'store')} {g(fastest, 'delivery_min')}분) → 확인 요청")
                 continue
             # 주문까지 되는 상점만 자동 주문 대상이다. 공개 주문 API 가 없는
             # 상점은 조회만 된다 — 제휴 여부를 모른 채 전부 주문하고 있었다.
-            orderable = [o for o in fit if getattr(o, "can_order", False)]
+            orderable = [o for o in fit if g(o, "can_order", False)]
             if not orderable:
                 ask.append({"name": name,
                             "reason": "제때 오는 상점 중 주문까지 되는 곳이 없다"
@@ -371,24 +386,25 @@ class ProcureSkill(Skill):
                 ev.append(f"{name}: 제때 도착하는 {len(fit)}곳 모두 조회만 가능 "
                           f"→ 사용자가 직접 주문해야 한다")
                 continue
-            best = min(orderable, key=lambda o: o.price_krw)
+            best = min(orderable, key=lambda o: g(o, 'price_krw'))
             ev.append(f"{name}: 상점 {len(offers)}곳 비교 → "
-                      + " / ".join(f"{o.store} {o.price_krw:,}원 {o.delivery_min}분"
+                      + " / ".join(f"{g(o, 'store')} {g(o, 'price_krw'):,}원 {g(o, 'delivery_min')}분"
                                    for o in offers))
 
             if name not in known:
                 ask.append({"name": name, "reason": "처음 구매하는 품목"})
                 ev.append(f"  {name}: 구매 이력 없음 → 확인 요청"); continue
-            if best.price_krw > auto_limit_krw:
+            if g(best, 'price_krw') > auto_limit_krw:
                 ask.append({"name": name,
-                            "reason": f"{best.price_krw:,}원 > 상한 {auto_limit_krw:,}원"})
+                            "reason": f"{g(best, 'price_krw'):,}원 > 상한 {auto_limit_krw:,}원"})
                 ev.append(f"  {name}: 금액 상한 초과 → 확인 요청"); continue
 
-            auto.append({"name": name, "price_krw": best.price_krw,
-                         "store": best.store, "delivery_min": best.delivery_min,
-                         "source": best.source})
-            ev.append(f"  {name}: {best.store} {best.price_krw:,}원 "
-                      f"{best.delivery_min}분 — 이력 있고 상한 이내 → 자동 주문")
+            auto.append({"name": name, "price_krw": g(best, "price_krw"),
+                         "store": g(best, "store"),
+                         "delivery_min": g(best, "delivery_min"),
+                         "source": g(best, "source")})
+            ev.append(f"  {name}: {g(best, 'store')} {g(best, 'price_krw'):,}원 "
+                      f"{g(best, 'delivery_min')}분 — 이력 있고 상한 이내 → 자동 주문")
 
         total = sum(a["price_krw"] for a in auto)
         eta = max((a["delivery_min"] for a in auto), default=0)
