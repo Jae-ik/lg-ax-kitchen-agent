@@ -14,7 +14,7 @@ import pathlib
 
 import kitchen as K
 from planner import Task
-from recipe_parse import contains_any
+from recipe_parse import contains_any, expand_avoid
 import store
 
 RECIPE_CACHE = pathlib.Path(__file__).parent / "data" / "recipes.json"
@@ -291,7 +291,9 @@ def domain_goal(constraints: dict) -> set:
 
 def build_tasks(constraints: dict) -> list:
     """상황에서 나온 제약을 반영해 이 도메인의 작업 목록을 만든다."""
-    avoid = list(constraints.get("avoid", []))
+    # 범주어('갑각류')는 여기서 구체 재료로 푼다. 세 스킬(recipe_source·
+    # menu·procure)이 모두 이 목록을 받으므로 **한 곳에서** 푼다.
+    avoid, _, _ = expand_avoid(constraints.get("avoid", []))
     require_complete = bool(constraints.get("skip_procurement"))
 
     def _recipe_bind(ctx):

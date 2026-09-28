@@ -204,9 +204,14 @@ def rule_understand(text: str) -> dict:
 
     # 기피 재료를 **먼저** 읽는다. 그래야 그것이 재고로 들어가지 않는다.
     avoid = []
-    for mm in re.finditer(r"([가-힣]{2,6}?)\s*(알레르기|알러지|못\s*먹|안\s*먹)",
+    # "못 드셔" 도 읽는다 — 어른 얘기를 할 때 흔하다. 처음엔 '먹' 만 봐서
+    # "갑각류를 못 드셔" 를 통째로 놓쳤다.
+    for mm in re.finditer(r"([가-힣]{2,6}?)\s*(알레르기|알러지|(?:못|안)\s*(?:먹|드))",
                           text):
         name = mm.group(1)
+        # "새우를 못 먹어" 의 '를' 을 뗀다. 안 떼면 '새우를' 이 기피어가 되어
+        # 레시피의 '새우' 에 걸리지 않는다.
+        name = re.sub(r"(을|를|은|는|이|가|도|랑|하고)$", "", name) or name
         # "있는 새우 알레르기" 처럼 앞말이 붙으면 아는 재료로 잘라 낸다
         for f in _FOOD:
             if name.endswith(f):
@@ -429,16 +434,49 @@ def _invented_numbers(text: str, metrics: dict) -> list:
 
 
 # ── 전체 ───────────────────────────────────────────────────────────────
-def run(text: str, ask=None, seed: int = 7) -> dict:
-    """자연어 한 줄에서 실행 결과와 설명까지."""
+def run(text: str, ask=None, seed: int = 7, approve=None) -> dict:
+    """자연어 한 줄에서 실행 결과와 설명까지.
+
+    **안전 항목(기피·나트륨)을 읽었으면 승인 없이 실행하지 않는다.**
+    처음엔 `needs_confirm` 을 결과에 적기만 하고 그대로 실행했다 —
+    경고는 아무것도 막지 않는다. 씽큐 클로의 "실행은 사람이 승인" 이
+    바로 이 자리다.
+
+    approve 는 (확인할 내용 dict) -> bool 이다. 주입받는다. 없으면 멈춘다.
+    """
     import contextlib
     import io as _io
 
     import personas
     import run_design
     from orchestrator import Trace
+    from recipe_parse import expand_avoid
 
     u = understand(text, ask=ask)
+    avoid = u["persona"].get("avoid", [])
+    expanded, notes, unresolved = expand_avoid(avoid)
+    ask_user = {"items": u["needs_confirm"], "avoid": avoid,
+                "expanded_to": expanded, "expansion": notes,
+                "unresolved": unresolved}
+
+    # 풀지 못한 범주어는 승인이 있어도 멈춘다. '곡류' 라는 글자는 레시피에
+    # 없으므로 아무것도 걸러지지 않는데, 사용자는 걸러졌다고 믿는다.
+    if unresolved:
+        return {"understood": u, "result": None, "stopped": True,
+                "confirm": ask_user,
+                "explained": {"text": (f"'{', '.join(unresolved)}' 가 어떤 재료들인지 "
+                                       f"몰라 거를 수 없습니다. 구체적인 재료 이름으로 "
+                                       f"알려 주세요."),
+                              "by": "규칙", "invented": []}}
+    if u["needs_confirm"] and not (approve and approve(ask_user)):
+        what = (f"못 드시는 것: {', '.join(avoid)}"
+                + (f" ({'; '.join(notes)})" if notes else ""))
+        return {"understood": u, "result": None, "stopped": True,
+                "confirm": ask_user,
+                "explained": {"text": f"실행 전에 확인이 필요합니다 — {what}. "
+                                      f"맞으면 승인해 주세요.",
+                              "by": "규칙", "invented": []}}
+
     pid = u["persona"]["id"]
     personas.PERSONAS[pid] = u["persona"]
 
@@ -447,11 +485,13 @@ def run(text: str, ask=None, seed: int = 7) -> dict:
         result = run_design.design_for(pid, Trace(), seed=seed)
     e = explain(result, ask=ask)
     return {"understood": u, "result": result, "explained": e,
-            "trace": buf.getvalue()}
+            "trace": buf.getvalue(), "stopped": False, "confirm": ask_user}
 
 
 def main() -> int:
-    text = " ".join(sys.argv[1:]) or \
+    args = [a for a in sys.argv[1:] if a != "--yes"]
+    yes = "--yes" in sys.argv
+    text = " ".join(args) or \
         "오늘 늦어. 9시 반쯤 들어가는데 냉장고에 배추랑 두부 있어. 30분 안에 먹고 싶어"
     ask = best_ask()
     print("=" * 74)
@@ -460,7 +500,7 @@ def main() -> int:
     print(f"\n사용자: {text}")
     print(f"LLM: {how()}")
 
-    out = run(text, ask=ask)
+    out = run(text, ask=ask, approve=(lambda c: True) if yes else None)
     u = out["understood"]
     print(f"\n[읽은 것] ({u['by']})")
     for w in u["read"]:
@@ -475,6 +515,13 @@ def main() -> int:
     print(f"\n[상황] 귀가 {p['arrive_home']} · 예산 {p['time_budget_min']}분 "
           f"· {p['household_size']}인 · 재고 {len(p['fridge'])}종 "
           f"· 수고 {len(p['friction_reported'])}건")
+
+    if out["stopped"]:
+        print(f"\n[멈춤] {out['explained']['text']}")
+        if not out["confirm"]["unresolved"]:
+            print("   승인하려면 --yes 를 붙여 다시 실행한다")
+        print()
+        return 0
 
     print(f"\n[설명] ({out['explained']['by']})")
     print(f"   {out['explained']['text']}")

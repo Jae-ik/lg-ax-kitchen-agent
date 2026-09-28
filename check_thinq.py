@@ -64,6 +64,71 @@ def c3():
     return ok, f"재고 {names} (비어 있어야 한다)"
 
 
+@check("범주어('갑각류')가 실제 레시피를 거른다")
+def c3b():
+    """c1 은 '새우 알레르기' 처럼 **구체어만** 시험했다. 사람은 '갑각류
+    못 먹어' 라고 말한다. LLM 이 '갑각류' 를 정확히 읽었는데도 판정이
+    문자열 일치라 갑각류가 든 공개 레시피 15건이 **하나도 안 걸렀다.**
+    읽기가 옳아도 받는 쪽이 범주를 모르면 소용없다 — 그래서 끝까지 본다."""
+    import kitchen_domain as kd
+    from recipe_parse import contains_any, expand_avoid
+    from skills import REGISTRY
+    SHELL = ("새우", "꽃게", "대게", "랍스터", "가재", "크랩")
+
+    def shellfish(pool):
+        return [x["menu"] for x in pool
+                if any(w in (x.get("parts_raw") or "") for w in SHELL)]
+    src = REGISTRY.get("recipe_source")
+    before = src.run(load=kd.load_recipes, match=contains_any,
+                     avoid=["갑각류"]).output["recipe_pool"]
+    av, _, _ = expand_avoid(["갑각류"])
+    after = src.run(load=kd.load_recipes, match=contains_any,
+                    avoid=av).output["recipe_pool"]
+    # 푼 뒤에 '얇게' 같은 부사가 게로 걸리지 않는지도 본다
+    thin = [x["menu"] for x in before if "얇게" in (x.get("parts_raw") or "")
+            and not any(w in (x.get("parts_raw") or "") for w in SHELL)]
+    wrongly = [m for m in thin if m not in [x["menu"] for x in after]]
+    ok = shellfish(before) and not shellfish(after) and not wrongly
+    return ok, (f"글자 그대로면 갑각류 {len(shellfish(before))}건 통과 → "
+                f"풀면 {len(shellfish(after))}건 · '얇게' 오탐 {len(wrongly)}건")
+
+
+@check("규칙 파서가 '못 드셔'·조사 붙은 기피를 읽는다")
+def c3c():
+    cases = {"며느리가 갑각류를 못 드셔": ["갑각류"],
+             "새우를 못 먹어": ["새우"],
+             "땅콩 알레르기 있어": ["땅콩"]}
+    got = {t: thinq.understand(t)["persona"]["avoid"] for t in cases}
+    ok = all(got[t] == want for t, want in cases.items())
+    return ok, " / ".join(f"{t[-8:]}→{v}" for t, v in got.items())
+
+
+@check("안전 항목은 승인 없이 실행하지 않는다")
+def c3d():
+    """처음엔 needs_confirm 을 결과에 적기만 하고 그대로 실행했다.
+    경고는 아무것도 막지 않는다."""
+    T = "갑각류 알레르기 있어. 7시 도착"
+    a = thinq.run(T)                                   # 승인 없음
+    b = thinq.run(T, approve=lambda c: False)          # 거절
+    c = thinq.run(T, approve=lambda c: True)           # 승인
+    ok = (a["stopped"] and a["result"] is None
+          and b["stopped"] and b["result"] is None
+          and not c["stopped"] and c["result"] is not None
+          and "새우" in a["confirm"]["expanded_to"])
+    return ok, (f"승인 없음 {'멈춤' if a['stopped'] else '실행'} · 거절 "
+                f"{'멈춤' if b['stopped'] else '실행'} · 승인 "
+                f"{'멈춤' if c['stopped'] else '실행'} · 확인 문구에 푼 목록 포함")
+
+
+@check("풀 수 없는 범주어면 승인이 있어도 멈춘다")
+def c3e():
+    """'곡류' 라는 글자는 레시피에 없어서 아무것도 안 걸러진다. 그런데
+    사용자는 걸러졌다고 믿는다 — 조용히 실행하면 안 된다."""
+    o = thinq.run("곡류 알레르기 있어", approve=lambda c: True)
+    ok = o["stopped"] and o["confirm"]["unresolved"] == ["곡류"]
+    return ok, o["explained"]["text"][:60]
+
+
 # ── 2 불신 ─────────────────────────────────────────────────────────────
 @check("LLM 이 준 터무니없는 값을 거른다")
 def c4():
