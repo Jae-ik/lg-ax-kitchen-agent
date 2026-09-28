@@ -42,6 +42,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 
 # 안전 확인이 필요한 항목 — LLM 이 읽었어도 사람이 확인한다
@@ -63,6 +64,14 @@ _DEFAULT = {
     "avoid": [], "dislike_noise_after": "23:00",
     "goal_hint": "", "friction_reported": [], "fridge": [],
 }
+
+# CLI 를 부를 때 기본 시스템 프롬프트를 이걸로 덮는다. 덮지 않으면
+# 사용자의 CLAUDE.md 를 따라 조언하고 확인을 요청한다 — 우리가 원하는
+# 것은 변환 한 번이다.
+CONVERTER_SYSTEM = (
+    "너는 문자열 변환기다. 요청된 형식만 그대로 출력한다. "
+    "설명·조언·확인 요청·메타 언급을 하지 않는다. "
+    "주어지지 않은 값은 지어내지 않는다.")
 
 PROMPT = """사용자가 한국어로 말한 상황에서 아래 항목을 뽑아 JSON 으로만 답하라.
 모르는 값은 넣지 마라 — 지어내지 마라.
@@ -97,14 +106,65 @@ def ask_claude(prompt: str) -> str:
     return "".join(b.text for b in msg.content if b.type == "text")
 
 
+def ask_claude_cli(prompt: str, timeout: int = 240) -> str:
+    """설치된 `claude` 명령으로 부른다 — **API 키가 없어도 된다.**
+
+    이 자리를 처음엔 비워 두고 "키가 없어 검증 못 함" 이라고 적었는데,
+    환경을 실제로 보니 API 키는 없지만 claude CLI 가 깔려 있었다.
+    **없다고 적기 전에 찾아봤어야 했다.**
+
+    두 가지를 조심한다. 처음엔 둘 다 놓쳐서 엉뚱한 답이 왔다.
+
+      1. 프롬프트를 **stdin 으로** 넘긴다. 명령줄 인자로 주면 Windows
+         shell 의 인용 규칙 때문에 개행·따옴표에서 잘린다 — 실제로
+         "'아래는' 에서 끊겨 들어왔습니다" 라는 답이 돌아왔다.
+      2. **빈 작업 디렉토리에서, 시스템 프롬프트를 덮어써서** 부른다.
+         그냥 부르면 CLI 가 프로젝트와 사용자의 CLAUDE.md 를 읽고
+         그것에 대해 답한다 — 실제로 "CLAUDE.md 규칙대로 #local 채널에
+         알림을 보내려 했지만" 같은 문장과, 이번 실행에 없는 숫자
+         (25·27·48)가 답에 섞여 왔다. 우리가 원하는 것은 문장 하나를
+         JSON 으로 바꾸는 **순수한 변환**이다.
+    """
+    import subprocess
+    import tempfile
+    exe = shutil.which("claude")
+    if not exe:
+        raise RuntimeError("claude 명령을 찾지 못했다")
+    with tempfile.TemporaryDirectory(prefix="thinq_") as empty:
+        r = subprocess.run(
+            [exe, "-p", "--system-prompt", CONVERTER_SYSTEM,
+             "--strict-mcp-config"],
+            input=prompt, cwd=empty, shell=True, capture_output=True,
+            text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if r.returncode != 0:
+        raise RuntimeError(f"claude 호출 실패 rc={r.returncode}: "
+                           f"{(r.stderr or '')[:200]}")
+    return r.stdout or ""
+
+
+def best_ask():
+    """지금 쓸 수 있는 가장 나은 호출 방법. 없으면 None(규칙으로 간다)."""
+    if os.environ.get("ANTHROPIC_API_KEY") or             os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        try:
+            import anthropic          # noqa: F401
+            return ask_claude
+        except ImportError:
+            pass
+    if shutil.which("claude"):
+        return ask_claude_cli
+    return None
+
+
 def available() -> bool:
     """지금 진짜 LLM 을 부를 수 있는가."""
-    try:
-        import anthropic          # noqa: F401
-    except ImportError:
-        return False
-    return bool(os.environ.get("ANTHROPIC_API_KEY")
-                or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    return best_ask() is not None
+
+
+def how() -> str:
+    a = best_ask()
+    return {None: "키도 CLI 도 없어 규칙으로 읽는다",
+            ask_claude: "anthropic SDK 로 부른다",
+            ask_claude_cli: "claude CLI 로 부른다 (API 키 불필요)"}[a]
 
 
 # ── 자연어 → 상황 ──────────────────────────────────────────────────────
@@ -249,7 +309,11 @@ def _validate(fields: dict):
         "goal_hint": (str, lambda v: len(v) <= 200),
         "avoid": (list, lambda v: all(isinstance(x, str) for x in v)),
         "friction_reported": (list, lambda v: all(isinstance(x, str) for x in v)),
-        "fridge": (list, lambda v: all(isinstance(x, dict) and "name" in x
+        # 이름만 있으면 받되 **나머지는 우리가 채운다.** 사용자는
+        # "배추 있어" 라고만 말하고 보관일을 말하지 않는다. LLM 도
+        # 그렇게 준다 — 실제로 stored_days 가 빠진 항목이 와서
+        # inventory 가 KeyError 로 깨졌다. 받는 쪽에서 메꾼다.
+        "fridge": (list, lambda v: all(isinstance(x, dict) and x.get("name")
                                        for x in v)),
     }
     for k, v in (fields or {}).items():
@@ -269,6 +333,22 @@ def _validate(fields: dict):
             bad.append(f"{k}: 검사 중 오류라 버렸다 ({v!r})")
             continue
         ok[k] = v
+
+    # 재고 항목의 빠진 칸을 채운다. 여기서 안 채우면 뒤에서 깨진다.
+    if "fridge" in ok:
+        filled = []
+        for x in ok["fridge"]:
+            filled.append({"name": x["name"],
+                           "qty_g": x.get("qty_g") or 300,
+                           "stored_days": x.get("stored_days", 3),
+                           "shelf_life_days": x.get("shelf_life_days") or 7})
+        missing = sum(1 for x in ok["fridge"]
+                      if not all(k in x for k in
+                                 ("qty_g", "stored_days", "shelf_life_days")))
+        if missing:
+            bad.append(f"fridge: {missing}개 항목의 양·보관일이 없어 "
+                       f"기본값(300g·3일·7일)으로 채웠다")
+        ok["fridge"] = filled
     return ok, bad
 
 
@@ -313,8 +393,8 @@ def rule_explain(result: dict) -> str:
 
 
 EXPLAIN_PROMPT = """아래는 주방 에이전트가 실제로 실행한 결과다.
-사용자에게 두세 문장으로 알려라. **수치를 지어내지 말고 아래 값만 써라.**
-아직 하지 않은 일을 한 것처럼 말하지 마라.
+사용자에게 **두세 문장으로만** 알려라. 목록·제목·주석을 쓰지 마라.
+**아래 값에 없는 수를 쓰지 마라.** 아직 하지 않은 일을 한 것처럼 말하지 마라.
 
 {data}"""
 
@@ -373,12 +453,12 @@ def run(text: str, ask=None, seed: int = 7) -> dict:
 def main() -> int:
     text = " ".join(sys.argv[1:]) or \
         "오늘 늦어. 9시 반쯤 들어가는데 냉장고에 배추랑 두부 있어. 30분 안에 먹고 싶어"
-    ask = ask_claude if available() else None
+    ask = best_ask()
     print("=" * 74)
     print("씽큐 클로 식 진입점 — 자연어로 받고, 판단은 측정이 한다")
     print("=" * 74)
     print(f"\n사용자: {text}")
-    print(f"LLM: {'Claude 를 부른다' if ask else '키가 없어 규칙으로 읽는다'}")
+    print(f"LLM: {how()}")
 
     out = run(text, ask=ask)
     u = out["understood"]

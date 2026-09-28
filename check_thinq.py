@@ -164,6 +164,35 @@ def c10():
                 if not ok else f"둘 다 {fp(a)}")
 
 
+# ── 진짜 호출 : --live 일 때만 ─────────────────────────────────────────
+# 매번 돌리면 느리고 비용이 든다. 기본은 가짜 LLM 으로 구조만 보고,
+# 진짜 호출은 손으로 켤 때만 한다.
+def live_checks() -> list:
+    out = []
+    ask = thinq.best_ask()
+    T = "혼자 먹어. 된장이랑 배추 두부 있고 7시 도착. 45분 정도 여유 있어"
+
+    a = thinq.run(T, ask=None)
+    b = thinq.run(T, ask=ask)
+
+    def fp(o):
+        v = o["result"]["verify"]
+        return (tuple(o["result"]["flow"]["steps"]), v["user_touches"],
+                v["metrics"].get("가열 시간(분)"),
+                v["metrics"].get("최종 질량비"))
+
+    out.append(("진짜 LLM 으로 읽어도 제어 결과가 같다", fp(a) == fp(b),
+                f"규칙 {fp(a)} / LLM {fp(b)}"))
+    out.append(("진짜 LLM 설명에 지어낸 수가 없다",
+                not b["explained"]["invented"],
+                f"지어낸 수 {b['explained']['invented']} · "
+                f"{b['explained']['text'][:60]}"))
+    u = b["understood"]
+    out.append(("진짜 LLM 이 상황을 읽어낸다", u["by"] == "LLM" and u["read"],
+                f"{u['by']} · {u['read'][0][:70] if u['read'] else '읽은 것 없음'}"))
+    return out
+
+
 def main() -> int:
     print("자연어 다리 검사 — 키 없이도 확인한다")
     print(f"  지금 진짜 LLM 을 부를 수 있는가: "
@@ -183,10 +212,27 @@ def main() -> int:
         if not ok:
             bad += 1
     print()
-    print(f"판정: {len(CHECKS) - bad}/{len(CHECKS)} 항목 통과")
-    if not thinq.available():
-        print("  주의: 진짜 LLM 호출 경로(ask_claude)는 키가 없어 "
-              "**한 번도 돌려 보지 못했다.** 주입 구조와 검증 로직만 확인했다.")
+    total = len(CHECKS)
+    if "--live" in sys.argv:
+        if not thinq.available():
+            print("  !!  --live 를 줬지만 부를 방법이 없다")
+            bad += 1
+        else:
+            print()
+            print(f"진짜 호출 ({thinq.how()})")
+
+            for title, ok, note in live_checks():
+                print(f"  {'OK ' if ok else '!! '} {title}")
+                print(f"        {note}")
+                total += 1
+                if not ok:
+                    bad += 1
+    else:
+        print(f"  ·   진짜 호출은 건너뛴다 — `python check_thinq.py --live` "
+              f"로 켠다 ({thinq.how()})")
+
+    print()
+    print(f"판정: {total - bad}/{total} 항목 통과")
     return 1 if bad else 0
 
 
