@@ -43,7 +43,9 @@ PROMPT = """너는 가전 서비스의 UX 시나리오 설계자다.
 - 기능 목록에 없는 일을 약속하지 마라. 덜어 줄 기능이 없으면 uncovered 에 넣고 이유를 적어라.
 - 장면 문장에 숫자를 쓰지 마라(분·g·원·회 등). 수치는 실행한 뒤에야 안다.
 - offset_min 은 귀가 시각({arrive}) 기준 분이다. 귀가 전이면 음수.
+  단, 고객 정보에 '집에 오는 동안 주문할 수 있다' 가 없으면 귀가 전에는 아무것도 하지 않는다.
 - 장면은 고객이 **하지 않아도 되는 일**이 드러나게 써라.
+- 어떤 불편과도 짝이 없지만 흐름에 필요한 장면은 friction 을 빈 목록 [] 으로 둬라.
 
 고객
 {persona}
@@ -59,6 +61,11 @@ PROMPT = """너는 가전 서비스의 UX 시나리오 설계자다.
               "system": "가전이 하는 일", "skill": "기능 이름",
               "friction": [불편 번호]}}],
   "uncovered": [{{"friction": 불편 번호, "why": "덜어 줄 기능이 없는 이유"}}]}}"""
+
+
+# 불편과 짝이 없는 장면의 removes. 어떤 불편 문장도 이 안에 들어가지
+# 않으므로 scenario_draft 의 '덮은 수' 에 잡히지 않는다.
+BACKGROUND = "(흐름상 필요한 장면 — 고객이 말한 불편과 직접 짝은 없다)"
 
 
 def _persona_text(persona: dict, constraints: dict) -> str:
@@ -114,7 +121,7 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
         t0 = persona.get("arrive_home", "19:00")
         base = list(fallback(persona, constraints, plus))
         report.update(raw=None, accepted=[], rejected=[], filled=[],
-                      uncovered=[], by="LLM")
+                      uncovered=[], adjusted=[], by="LLM")
 
         prompt = (PROMPT
                   .replace("{arrive}", t0)
@@ -143,9 +150,25 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
                 continue
             cap = by_skill[s["skill"]]
             idx = sorted(set(s["friction"]))
-            beat = {"at": plus(t0, int(s["offset_min"])),
+            # 불편과 짝이 없는 장면은 **배경 장면**으로 받는다. 처음엔 버렸더니
+            # p3 에서 조리·세척 장면이 전부 빠져 시나리오가 5장면 → 2장면이 됐다.
+            # 틀도 고객이 말하지 않은 수고의 장면을 넣는다. 다만 **덮은 수에는
+            # 세지 않는다** — removes 에 어떤 불편 문장도 들어가지 않는다.
+            removes = (" / ".join(friction[i]["what"] for i in idx) if idx
+                       else BACKGROUND)
+            # 집에 없는 동안 움직일 수 있는 건 선제 주문 상황뿐이다. 아니면
+            # 실행은 귀가 후에 일어나므로, 귀가 전 장면은 시각이 실행과
+            # 어긋난다 — 실제로 p3 에서 메뉴·주문을 17:35 에 놓았다.
+            # 버리지 않고 귀가 시각으로 옮기되, 옮긴 사실을 남긴다.
+            off = int(s["offset_min"])
+            if off < 0 and not constraints.get("preorder"):
+                report["adjusted"].append(
+                    f"{cap['skill']}: 귀가 {-off}분 전 → 귀가 시각 "
+                    f"(선제 주문 상황이 아니라 집에 오기 전에는 실행되지 않는다)")
+                off = 0
+            beat = {"at": plus(t0, off),
                     "user": s["user"].strip(), "system": s["system"].strip(),
-                    "removes": " / ".join(friction[i]["what"] for i in idx),
+                    "removes": removes,
                     "verified_by": cap["skill"], "source": "LLM"}
             # 검증 지표는 **LLM 이 아니라 도메인이** 정한다.
             if len(cap["metrics"]) == 1:
@@ -154,7 +177,8 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
                 beat["expect_any"] = list(cap["metrics"])
             beats.append(beat)
             report["accepted"].append(
-                f"{beat['at']} {cap['skill']} ← 불편 {idx}")
+                f"{beat['at']} {cap['skill']} ← "
+                + (f"불편 {idx}" if idx else "배경 장면"))
 
         for u in d.get("uncovered") or []:
             if isinstance(u, dict) and isinstance(u.get("friction"), int) \
@@ -187,9 +211,9 @@ def _reject_reason(s, by_skill, n_friction):
         return (f"'{s.get('skill')}' 은 이번 계획에 없는 기능이다 — "
                 f"실행되지 않을 일을 약속할 수 없다")
     fr = s.get("friction")
-    if not isinstance(fr, list) or not fr or not all(
+    if not isinstance(fr, list) or not all(
             isinstance(i, int) and 0 <= i < n_friction for i in fr):
-        return "덜어 주는 불편 번호가 없거나 틀렸다"
+        return "불편 번호가 목록이 아니거나 범위를 벗어났다"
     off = s.get("offset_min")
     if not isinstance(off, int) or isinstance(off, bool) or not -240 <= off <= 240:
         return f"시각이 범위를 벗어났다({off!r})"

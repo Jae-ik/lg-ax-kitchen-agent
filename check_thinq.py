@@ -229,6 +229,136 @@ def c10():
                 if not ok else f"둘 다 {fp(a)}")
 
 
+# ── 7 설계 : LLM 이 장면을 제안하고 코드·실행이 확정한다 ─────────────────
+def _design(pid, reply, persona_reply=None):
+    """페르소나 하나를 LLM 장면 제안으로 설계한다. reply 는 가짜 LLM 답."""
+    import contextlib
+    import io
+    import run_design
+    from orchestrator import Trace
+    from llm_design import make_llm_beats
+    from kitchen_domain import kitchen_beats, kitchen_capabilities
+    ask = reply if callable(reply) else (lambda p: reply)
+    fac = (lambda fo: make_llm_beats(ask, kitchen_capabilities, kitchen_beats, fo))
+    with contextlib.redirect_stdout(io.StringIO()):
+        return run_design.design_for(pid, Trace(), beats_factory=fac)
+
+
+def _scenes(*scenes, uncovered=()):
+    return json.dumps({"scenes": [
+        {"offset_min": o, "user": u, "system": sy, "skill": sk, "friction": f}
+        for o, u, sy, sk, f in scenes], "uncovered": list(uncovered)})
+
+
+@check("말로 한 불편을 틀은 못 덮고 LLM 제안은 덮는다")
+def d1():
+    """틀은 '덮었다' 를 문자열 포함으로 센다. 사람 말은 틀의 글자와 다르다."""
+    per = json.dumps({"arrive_home": "19:00", "time_budget_min": 45,
+                      "household_size": 2,
+                      "friction_reported": ["냄비 앞에서 기다리는 것",
+                                            "퇴근하고 뭐 해먹을지 고민하는 것"]})
+    sc = _scenes((0, "메뉴를 고민하지 않는다", "재고에 맞는 메뉴를 골라 둔다",
+                  "menu", [1]),
+                 (5, "부를 때만 온다", "화력을 맞추고 다 되면 끈다",
+                  "converge", [0]))
+    a = thinq.run("아무말", ask=lambda p: per)          # 설명도 같은 답 — 무관
+    b = thinq.run("아무말",
+                  ask=lambda p: sc if "시나리오 설계자" in p else per)
+    ca, cb = a["result"]["scenario"], b["result"]["scenario"]
+    ok = ca["covered"] == 0 and cb["covered"] == 2
+    return ok, f"틀 {ca['covered']}/{ca['total_friction']} → LLM {cb['covered']}/{cb['total_friction']}"
+
+
+@check("이번 계획에 없는 기능을 약속한 장면은 버린다")
+def d2():
+    """p1 은 조달을 건너뛴다. '주문한다' 장면은 실행되지 않을 약속이다.
+    처음엔 플래너를 직접 불러 p1 에 procure 가 허용됐다."""
+    sc = _scenes((0, "장을 안 본다", "부족분을 주문한다", "procure", [0]),
+                 (1, "썰지 않는다", "로봇팔이 썰어 준다", "robot_arm", [0]),
+                 (5, "부를 때만 온다", "화력을 맞춘다", "converge", [1]))
+    r = _design("p1_야근", sc)["design_report"]
+    rej = " ".join(r["rejected"])
+    ok = ("procure" in rej and "robot_arm" in rej
+          and any("converge" in a for a in r["accepted"]))
+    return ok, f"버림 {len(r['rejected'])}건(procure·robot_arm) · 받음 {len(r['accepted'])}건"
+
+
+@check("실행 전에 수치를 약속한 장면은 버린다")
+def d3():
+    sc = _scenes((5, "부를 때만 온다", "12분 만에 끝낸다", "converge", [1]),
+                 (5, "부를 때만 온다", "다 되면 스스로 끈다", "converge", [1]))
+    r = _design("p1_야근", sc)["design_report"]
+    ok = len(r["rejected"]) == 1 and "수치" in r["rejected"][0] \
+        and len(r["accepted"]) == 1
+    return ok, r["rejected"][0][:60] if r["rejected"] else "버린 것 없음"
+
+
+@check("LLM 이 알레르기 장면을 빠뜨려도 틀 장면이 채운다")
+def d4():
+    """p3 의 '재료마다 못 먹는 것이 섞였는지 확인하는 일' 을 LLM 이 안
+    덮으면, 그것을 덮는 틀 장면(menu 기피 필터)이 들어가야 한다."""
+    sc = _scenes((10, "부를 때만 온다", "화력을 맞춘다", "converge", []))
+    r = _design("p3_알레르기", sc)
+    beats = r["scenario"]["beats"]
+    safety = [b for b in beats if b.get("source") == "틀"
+              and "못 먹는 것" in b["removes"] and b["verified_by"] == "menu"]
+    ok = bool(safety) and any("menu" in f for f in r["design_report"]["filled"])
+    return ok, f"틀로 채움 {r['design_report']['filled']}"
+
+
+@check("LLM 이 실패하면 틀 장면으로 돌아간다")
+def d5():
+    def boom(p):
+        raise RuntimeError("연결 끊김")
+    outs = {"예외": boom, "빈 답": lambda p: "", "말만": lambda p: "죄송해요",
+            "scenes 없음": lambda p: '{"hello": 1}'}
+    bad = []
+    for k, a in outs.items():
+        r = _design("p1_야근", a)
+        if r["design_report"]["by"] != "틀" or not r["verify"]["verified"]:
+            bad.append(k)
+    return not bad, ("4가지 모두 틀로 돌아가 시나리오 달성" if not bad
+                     else f"실패: {bad}")
+
+
+@check("불편과 짝 없는 장면은 받되 덮은 수에 안 센다")
+def d6():
+    sc = _scenes((10, "부를 때만 온다", "화력을 맞춘다", "converge", []))
+    r = _design("p1_야근", sc)
+    got = [b for b in r["scenario"]["beats"] if b.get("source") == "LLM"]
+    from llm_design import BACKGROUND
+    ok = got and got[0]["removes"] == BACKGROUND
+    return ok, f"배경 장면 {len(got)}개 · 덮은 수 {r['scenario']['covered']}"
+
+
+@check("선제 주문이 아니면 귀가 전 장면을 귀가 시각으로 옮긴다")
+def d7():
+    sc = _scenes((-50, "장을 안 본다", "부족분을 판단해 주문한다", "procure", [0]))
+    r = _design("p3_알레르기", sc)
+    b = [x for x in r["scenario"]["beats"] if x.get("source") == "LLM"][0]
+    ok = b["at"] == "18:30" and r["design_report"]["adjusted"]
+    return ok, f"장면 시각 {b['at']} · {r['design_report']['adjusted'][:1]}"
+
+
+@check("진짜 LLM 이 p3 에 준 답을 재생하면 같은 결과가 나온다")
+def d8():
+    """2026-09-28 에 claude CLI 가 준 원문(fixtures). 키 없이 재생한다.
+    틀은 p3 수고를 1/4 덮었고, 이 제안은 3/4 를 덮고 남은 하나(조리 기구
+    분리)는 '덜어 줄 기능이 없다' 고 스스로 밝혔다."""
+    import pathlib
+    raw = json.loads(pathlib.Path("fixtures/llm_p3_scenes.json")
+                     .read_text(encoding="utf-8"))["raw"]
+    r1, r2 = _design("p3_알레르기", raw), _design("p3_알레르기", raw)
+    s1, v1 = r1["scenario"], r1["verify"]
+    same = ([b["at"] + b["system"] for b in s1["beats"]]
+            == [b["at"] + b["system"] for b in r2["scenario"]["beats"]])
+    ok = (same and s1["covered"] == 3 and s1["total_friction"] == 4
+          and v1["verified"] and r1["design_report"]["uncovered"])
+    return ok, (f"덮음 {s1['covered']}/{s1['total_friction']} · 장면 "
+                f"{v1['beats_met']}/{v1['beats_total']} · 두 번 같음 {same} · "
+                f"못 덮는다고 밝힘 {len(r1['design_report']['uncovered'])}건")
+
+
 # ── 진짜 호출 : --live 일 때만 ─────────────────────────────────────────
 # 매번 돌리면 느리고 비용이 든다. 기본은 가짜 LLM 으로 구조만 보고,
 # 진짜 호출은 손으로 켤 때만 한다.
