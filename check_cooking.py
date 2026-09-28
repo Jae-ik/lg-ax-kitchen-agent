@@ -351,12 +351,38 @@ def c15():
     rows = json.load(io.open("data/recipes.json", encoding="utf-8"))["recipes"]
     names = {i["name"] for r in rows
              for i in R.parse_ingredients(r.get("parts_raw") or "")}
-    REAL_ONE = {"무", "꿀", "잣", "파", "배", "쌀", "떡", "밥", "물", "국"}
+    # 굴·콩은 소제목("재료 굴(40g)", "재료 콩(백태)")을 떼면서 드러났다.
+    # 전에는 '재료 굴' 로 남아 이 검사에 안 잡혔을 뿐 실재 재료다.
+    REAL_ONE = {"무", "꿀", "잣", "파", "배", "쌀", "떡", "밥", "물", "국",
+                "굴", "콩"}
     odd = sorted(n for n in names if len(n) == 1 and n not in REAL_ONE)
     ok = not bad and not odd
     return ok, (f"표기 {len(want)}종 " + ("전부 맞음" if not bad else str(bad))
                 + f" · 자료 {len(rows)}건에서 설명 안 되는 한 글자 이름 "
                 + (str(odd) if odd else "없음"))
+
+
+@check("오늘 안에 못 구하는 재료가 필요한 메뉴는 고르지 않는다")
+def c_late():
+    """p3 는 720분 뒤에 올 찹쌀이 필요한 삼계탕을 골랐고, 확인을 승인한
+    것으로 보고 **찹쌀을 즉시 재고에 넣었다.** 그 찹쌀이 빨아들일 물
+    1090g 까지 더 부었다. 고를 때 막고, 승인한 것도 배송 시간을 기다린다."""
+    import contextlib
+    import run_design
+    import store
+    from orchestrator import Trace
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = run_design.design_for("p3_알레르기", Trace(), seed=7)
+    m = r["verify"]["metrics"]
+    ev = [e for s_ in r["verify"]["execution"] if s_["skill"] == "menu"
+          for e in (s_.get("evidence") or [])]
+    ok = (m.get("사용한 기록") != "pub_639"
+          and "찹쌀" not in str(m.get("확인 후 승인"))
+          and not str(m.get("물 보충", "")).startswith("재료가 빨아들일 1090")
+          and store.min_delivery_min(item="없는재료") is None)
+    return ok, (f"메뉴 {m.get('메뉴')}({m.get('사용한 기록')}) · 조달 "
+                f"{m.get('조달 대기')} · 없는 품목 배송 "
+                f"{store.min_delivery_min(item='없는재료')}")
 
 
 @check("같은 재료가 두 번 나오면 합친다")

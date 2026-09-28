@@ -235,9 +235,8 @@ def rule_understand(text: str) -> dict:
             if any(c == f or (len(f) >= 2 and f in c) for c in chunks):
                 found.append(f)
         if found:
-            got["fridge"] = [{"name": f, "qty_g": 300, "stored_days": 3,
-                              "shelf_life_days": 7} for f in found]
-            why.append(f"재료로 읽음: {', '.join(found)} (양·보관일은 기본값)")
+            got["fridge"] = [{"name": f} for f in found]
+            why.append(f"재료로 읽음: {', '.join(found)} (양은 가정, 보관일은 모름)")
 
     if "아침" in text and ("바쁘" in text or "일찍" in text):
         got["next_morning_rush"] = True
@@ -305,8 +304,9 @@ def _validate(fields: dict):
     """
     ok, bad = {}, []
     CHECK = {
-        "arrive_home": (str, lambda v: re.fullmatch(r"\d{1,2}:\d{2}", v)),
-        "dislike_noise_after": (str, lambda v: re.fullmatch(r"\d{1,2}:\d{2}", v)),
+        # "19:75"·"25:00" 도 형식은 맞다. 시·분 범위까지 본다.
+        "arrive_home": (str, _is_clock),
+        "dislike_noise_after": (str, _is_clock),
         "time_budget_min": (int, lambda v: 1 <= v <= 600),
         "household_size": (int, lambda v: 1 <= v <= 12),
         "max_sodium_mg": ((int, float), lambda v: 0 < v <= 5000),
@@ -339,22 +339,82 @@ def _validate(fields: dict):
             continue
         ok[k] = v
 
-    # 재고 항목의 빠진 칸을 채운다. 여기서 안 채우면 뒤에서 깨진다.
     if "fridge" in ok:
-        filled = []
-        for x in ok["fridge"]:
-            filled.append({"name": x["name"],
-                           "qty_g": x.get("qty_g") or 300,
-                           "stored_days": x.get("stored_days", 3),
-                           "shelf_life_days": x.get("shelf_life_days") or 7})
-        missing = sum(1 for x in ok["fridge"]
-                      if not all(k in x for k in
-                                 ("qty_g", "stored_days", "shelf_life_days")))
-        if missing:
-            bad.append(f"fridge: {missing}개 항목의 양·보관일이 없어 "
-                       f"기본값(300g·3일·7일)으로 채웠다")
-        ok["fridge"] = filled
+        ok["fridge"], notes = _clean_fridge(ok["fridge"])
+        bad.extend(notes)
     return ok, bad
+
+
+def _is_clock(v: str) -> bool:
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", v or "")
+    return bool(m) and int(m.group(1)) < 24 and int(m.group(2)) < 60
+
+
+def _num(v):
+    """'300g'·'300'·300.0 을 수로. 못 읽으면 None."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return v
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(g|그램)?\s*", str(v))
+    return float(m.group(1)) if m else None
+
+
+# 이름에 붙어 오는 수량·어림말. '한·두·반' 은 **앞에 공백이 있을 때만**
+# 뗀다 — 없으면 호두가 '호', 완두가 '완' 이 됐다(실제로 그렇게 잘렸다).
+# "두부 한 모" 의 '한 모' 를 떼지 않으면
+# 메뉴 단계는 '두부' 가 있다고 보고(부분 일치), 계량 단계는 '두부' 를
+# 못 찾는다(정확 일치) — 실제로 그렇게 계량이 실패했다.
+_AMOUNT_WORDS = re.compile(
+    r"(?:\s+(?:한|두|세|네|반|몇)|\s*\d+(?:\.\d+)?)\s*"
+    r"(?:개|모|통|단|봉|팩|마리|송이|포기|근|줌|쪽|알|컵|인분|g|그램|kg)?\s*$"
+    r"|\s*(?:조금|약간|좀|많이|남은 거|남은것|반쯤)\s*$")
+
+
+def _clean_fridge(items: list):
+    """LLM·규칙이 읽은 재고를 계량·물리에 넣을 수 있는 형태로.
+
+    · 이름에서 수량·어림말을 뗀다(두부 한 모 → 두부)
+    · 양은 수로 읽고 **0 이하면 버린다** — 음수 질량이 냄비에 들어갔다
+    · 같은 재료는 합친다
+    · **보관일·수명을 모르면 지어내지 않는다(None).** 전에는 3일·7일을
+      채웠는데, 보관일은 임박 판단과 계량 때 채소에서 나오는 물(하루 2%)
+      까지 정한다 — 사용자가 말하지 않은 물 6% 를 만들고 있었다.
+    · 양을 모르면 300g 으로 둔다. 조리가 돌려면 양이 있어야 해서다
+      (**가정**이며 그렇게 적는다).
+    """
+    from recipe_parse import clean
+    merged, notes, guessed = {}, [], []
+    for x in items:
+        raw = str(x["name"]).strip()
+        name = clean(_AMOUNT_WORDS.sub("", raw).strip()) or raw
+        if name != raw:
+            notes.append(f"fridge: '{raw}' 를 '{name}' 로 읽었다")
+        q = _num(x.get("qty_g"))
+        if x.get("qty_g") is not None and q is None:
+            notes.append(f"fridge: {name} 의 양 {x.get('qty_g')!r} 를 읽지 못했다")
+        if q is not None and q <= 0:
+            notes.append(f"fridge: {name} 의 양 {q} 는 물리적으로 불가능해 버렸다")
+            continue
+        sd = _num(x.get("stored_days"))
+        sd = int(sd) if sd is not None and sd >= 0 else None
+        sl = _num(x.get("shelf_life_days"))
+        sl = int(sl) if sl is not None and sl > 0 else None
+        if q is None:
+            guessed.append(name)
+        if name in merged:
+            m = merged[name]
+            m["qty_g"] = (m["qty_g"] or 300) + (q or 300)
+            notes.append(f"fridge: {name} 가 두 번 와서 양을 합쳤다")
+            continue
+        merged[name] = {"name": name, "qty_g": q if q is not None else 300,
+                        "stored_days": sd, "shelf_life_days": sl}
+    if guessed:
+        notes.append(f"fridge: 양을 몰라 300g 으로 가정 — {', '.join(guessed)}")
+    unknown = [n for n, v in merged.items() if v["stored_days"] is None]
+    if unknown:
+        notes.append(f"fridge: 보관일을 몰라 임박 판단에서 뺀다 — {', '.join(unknown)}")
+    return list(merged.values()), notes
 
 
 # ── 지표 → 사람 말 ─────────────────────────────────────────────────────
@@ -455,9 +515,10 @@ def run(text: str, ask=None, seed: int = 7, approve=None) -> dict:
     u = understand(text, ask=ask)
     avoid = u["persona"].get("avoid", [])
     expanded, notes, unresolved = expand_avoid(avoid)
+    no_hit = _no_hit(avoid)
     ask_user = {"items": u["needs_confirm"], "avoid": avoid,
                 "expanded_to": expanded, "expansion": notes,
-                "unresolved": unresolved}
+                "unresolved": unresolved, "no_hit": no_hit}
 
     # 풀지 못한 범주어는 승인이 있어도 멈춘다. '곡류' 라는 글자는 레시피에
     # 없으므로 아무것도 걸러지지 않는데, 사용자는 걸러졌다고 믿는다.
@@ -471,6 +532,12 @@ def run(text: str, ask=None, seed: int = 7, approve=None) -> dict:
     if u["needs_confirm"] and not (approve and approve(ask_user)):
         what = (f"못 드시는 것: {', '.join(avoid)}"
                 + (f" ({'; '.join(notes)})" if notes else ""))
+        # 승인하면 걸러졌다고 믿는다. 이 말로는 **아무것도 안 걸리면** 그렇게
+        # 말해야 한다 — '매운 것' 은 재료 이름이 아니라 0건이다.
+        if no_hit:
+            what += (f". 단 '{', '.join(no_hit)}' 가 들어간 자료는 0건이라 "
+                     f"이 말로는 아무것도 거르지 않습니다 — 재료 이름이 아니면 "
+                     f"구체적인 재료로 알려 주세요")
         return {"understood": u, "result": None, "stopped": True,
                 "confirm": ask_user,
                 "explained": {"text": f"실행 전에 확인이 필요합니다 — {what}. "
@@ -486,14 +553,32 @@ def run(text: str, ask=None, seed: int = 7, approve=None) -> dict:
         factory = None
         if ask is not None:
             from llm_design import make_llm_beats
-            from kitchen_domain import kitchen_beats, kitchen_capabilities
-            factory = (lambda fo: make_llm_beats(ask, kitchen_capabilities,
-                                                 kitchen_beats, fo))
+            import kitchen_domain as KD
+            factory = (lambda fo: make_llm_beats(
+                ask, KD.kitchen_capabilities, KD.kitchen_beats, fo,
+                human_only=KD.HUMAN_ONLY, claims=KD.CLAIMS,
+                conditional=KD.CONDITIONAL))
         result = run_design.design_for(pid, Trace(), seed=seed,
                                        beats_factory=factory)
     e = explain(result, ask=ask)
     return {"understood": u, "result": result, "explained": e,
             "trace": buf.getvalue(), "stopped": False, "confirm": ask_user}
+
+
+def _no_hit(avoid) -> list:
+    """풀어도 자료(공개 레시피·내 기록) 어디에도 걸리지 않는 기피어."""
+    import kitchen as K
+    from kitchen_domain import load_recipes
+    from recipe_parse import contains_any, expand_avoid
+    texts = [r.get("parts_raw") or "" for r in load_recipes()["recipes"]]
+    texts += [" ".join(i["name"] for i in r.get("ingredients", []))
+              for r in K.RECORDS.values()]
+    out = []
+    for a in avoid or []:
+        keys, _, _ = expand_avoid([a])
+        if not any(contains_any(t, keys) for t in texts):
+            out.append(a)
+    return out
 
 
 def main() -> int:

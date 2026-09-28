@@ -45,6 +45,8 @@ PROMPT = """너는 가전 서비스의 UX 시나리오 설계자다.
 - offset_min 은 귀가 시각({arrive}) 기준 분이다. 귀가 전이면 음수.
   단, 고객 정보에 '집에 오는 동안 주문할 수 있다' 가 없으면 귀가 전에는 아무것도 하지 않는다.
 - 장면은 고객이 **하지 않아도 되는 일**이 드러나게 써라.
+- 재료 손질·투입·젓기·뚜껑 여닫기·식기 넣기는 사람이 한다. 가전이 한다고 쓰지 마라.
+- 장면 순서는 기능 목록 순서를 따른다(앞 기능이 끝나야 뒤 기능이 돈다).
 - 어떤 불편과도 짝이 없지만 흐름에 필요한 장면은 friction 을 빈 목록 [] 으로 둬라.
 
 고객
@@ -100,7 +102,8 @@ def _parse(raw: str):
     return d, None
 
 
-def make_llm_beats(ask, capabilities, fallback, friction_of):
+def make_llm_beats(ask, capabilities, fallback, friction_of,
+                   human_only=(), claims=(), conditional=None):
     """LLM 으로 장면을 제안받는 beats_for 를 만든다.
 
     ask          (프롬프트) -> 문자열. 주입받는다
@@ -108,6 +111,10 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
                  **지금 계획에 실제로 들어가는** 기능만. 도메인이 준다
     fallback     틀 장면 함수(kitchen_beats). LLM 이 실패하거나 놓친 수고를 채운다
     friction_of  (persona, constraints) -> [{"what", ...}]  덮어야 할 수고
+    human_only   [(정규식, 이유)]  가전이 할 수 없는 일. 장면이 약속하면 버린다
+    claims       [(약속 정규식, 지표, 값 정규식, 이름)]  조건 없이 약속하면
+                 실행 결과에 그 일이 있었는지 experience_verify 가 본다
+    conditional  조건을 단 문장을 알아보는 정규식 — 이것이 있으면 약속이 아니다
 
     돌려준 함수의 `.report` 에 무엇을 받아들이고 버렸는지 남는다.
     """
@@ -123,9 +130,13 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
         report.update(raw=None, accepted=[], rejected=[], filled=[],
                       uncovered=[], adjusted=[], by="LLM")
 
+        who = _persona_text(persona, constraints)
+        # 장면에 써도 되는 수: 이미 **입력에 있는** 수(귀가 시각·인원·예산).
+        # 이것까지 막으면 "두 사람 몫" 을 "2인분" 으로 쓴 옳은 장면을 버린다.
+        grounded = set(re.findall(r"\d+", who))
         prompt = (PROMPT
                   .replace("{arrive}", t0)
-                  .replace("{persona}", _persona_text(persona, constraints))
+                  .replace("{persona}", who)
                   .replace("{friction}", "\n".join(
                       f"  {i}. {f['what']}" for i, f in enumerate(friction)))
                   .replace("{caps}", "\n".join(
@@ -144,7 +155,8 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
 
         beats = []
         for s in d["scenes"]:
-            why = _reject_reason(s, by_skill, len(friction))
+            why = (_reject_reason(s, by_skill, len(friction), grounded)
+                   or _human_only(s, human_only))
             if why:
                 report["rejected"].append(f"{str(s.get('system'))[:30]} — {why}")
                 continue
@@ -166,10 +178,25 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
                     f"{cap['skill']}: 귀가 {-off}분 전 → 귀가 시각 "
                     f"(선제 주문 상황이 아니라 집에 오기 전에는 실행되지 않는다)")
                 off = 0
-            beat = {"at": plus(t0, off),
+            elif off < 0 and cap.get("needs_person"):
+                # 선제 주문이어도 계량·조리·세척기 넣기는 사람이 집에 있어야 한다
+                report["adjusted"].append(
+                    f"{cap['skill']}: 귀가 {-off}분 전 → 귀가 시각 "
+                    f"(사람 손이 필요한 단계라 집에 오기 전에는 못 한다)")
+                off = 0
+            beat = {"at": plus(t0, off), "_off": off, "_step": cap.get("step", 0),
+                    "_np": bool(cap.get("needs_person")),
                     "user": s["user"].strip(), "system": s["system"].strip(),
                     "removes": removes,
                     "verified_by": cap["skill"], "source": "LLM"}
+            # 조건 없이 한 약속은 결과로 확인한다
+            sysx = beat["system"]
+            for pat, metric, val, name in claims:
+                if re.search(pat, sysx) and not (conditional and
+                                                 re.search(conditional, sysx)):
+                    beat["expect_value"] = {"metric": metric, "pattern": val,
+                                            "claim": name}
+                    break
             # 검증 지표는 **LLM 이 아니라 도메인이** 정한다.
             if len(cap["metrics"]) == 1:
                 beat["expect_metric"] = cap["metrics"][0]
@@ -179,6 +206,41 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
             report["accepted"].append(
                 f"{beat['at']} {cap['skill']} ← "
                 + (f"불편 {idx}" if idx else "배경 장면"))
+
+        # **장면 시각은 계획 순서를 거스르지 않는다.** 조리가 메뉴 고르기보다
+        # 먼저 올 수는 없다.
+        #
+        # 어긋나면 **앞 단계를 당기는 것**을 먼저 시도한다. 처음엔 뒤 단계를
+        # 미루기만 했더니, p4(퇴근길 선제 주문)에서 "귀가 30분 전 주문" 이
+        # 귀가 뒤로 밀려 선제 주문의 뜻이 사라졌다 — 메뉴를 주문 시각으로
+        # 당기는 것이 맞았다. 당길 수 없는 단계(사람 손이 필요하거나, 선제
+        # 주문이 아닌데 귀가 전)일 때만 뒤 단계를 민다.
+        order = sorted(beats, key=lambda b: (b["_step"], b["_off"]))
+        earliest = None
+        for b in reversed(order):
+            if earliest is not None and b["_off"] > earliest:
+                can = earliest >= 0 or (constraints.get("preorder")
+                                        and not b["_np"])
+                if can:
+                    report["adjusted"].append(
+                        f"{b['verified_by']}: {b['at']} → {plus(t0, earliest)} "
+                        f"(계획상 뒤 단계 장면보다 늦을 수 없어 당겼다)")
+                    b["_off"] = earliest
+                    b["at"] = plus(t0, earliest)
+            earliest = b["_off"] if earliest is None else min(earliest, b["_off"])
+        latest = None
+        for b in order:
+            if latest is not None and b["_off"] < latest:
+                report["adjusted"].append(
+                    f"{b['verified_by']}: {b['at']} → {plus(t0, latest)} "
+                    f"(계획상 앞 단계 장면보다 이를 수 없다)")
+                b["_off"] = latest
+                b["at"] = plus(t0, latest)
+            latest = b["_off"] if latest is None else max(latest, b["_off"])
+        for b in beats:
+            b.pop("_off", None)
+            b.pop("_step", None)
+            b.pop("_np", None)
 
         for u in d.get("uncovered") or []:
             if isinstance(u, dict) and isinstance(u.get("friction"), int) \
@@ -203,7 +265,15 @@ def make_llm_beats(ask, capabilities, fallback, friction_of):
     return beats_for
 
 
-def _reject_reason(s, by_skill, n_friction):
+def _human_only(s, rules):
+    """가전이 할 수 없는 손일을 약속했으면 그 이유."""
+    for pat, why in rules:
+        if re.search(pat, s.get("system") or ""):
+            return f"가전이 할 수 없는 일을 약속했다 — {why}"
+    return None
+
+
+def _reject_reason(s, by_skill, n_friction, grounded=frozenset()):
     """장면을 받아들일 수 없는 이유. 받아들이면 None."""
     if not isinstance(s, dict):
         return "형식이 아니다"
@@ -221,7 +291,10 @@ def _reject_reason(s, by_skill, n_friction):
         v = s.get(k)
         if not isinstance(v, str) or not v.strip() or len(v) > 160:
             return f"{k} 문장이 비었거나 너무 길다"
-        # 실행 전에 수치를 약속하면 그 수치는 지어낸 것이다
-        if re.search(r"\d", v):
-            return f"{k} 문장에 수치가 있다('{v[:24]}') — 수치는 실행한 뒤에야 안다"
+        # 실행 전에 수치를 약속하면 그 수치는 지어낸 것이다. 입력에 있던
+        # 수(귀가 시각·인원·예산)는 지어낸 것이 아니므로 허용한다.
+        made_up = [n for n in re.findall(r"\d+", v) if n not in grounded]
+        if made_up:
+            return (f"{k} 문장에 입력에 없는 수 {made_up} 가 있다('{v[:24]}') — "
+                    f"수치는 실행한 뒤에야 안다")
     return None

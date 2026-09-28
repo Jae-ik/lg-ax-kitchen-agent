@@ -296,6 +296,35 @@ KITCHEN_CAPS = {
 }
 
 
+# 사람이 집에 있어야 일어나는 단계. 선제 주문이어도 귀가 전에는 못 한다 —
+# 계량은 사람이 담고, 재료 투입·뚜껑은 사람이 하고, 세척기에는 사람이 넣는다.
+NEEDS_PERSON = {"prep", "converge", "aftercare"}
+
+# 가전이 **할 수 없는** 손일. 장면이 이것을 가전이 한다고 말하면 버린다.
+# (제안서 표1: 재료 손질·투입·뚜껑·젓기·식기 넣기는 사람이 한다)
+# 문구로 거르는 것이라 완전하지 않다 — 빠져나간 약속은 실행 검증이 못 잡는다.
+HUMAN_ONLY = (
+    (r"(스스로|자동으로|알아서|대신)\s*[^.,]{0,12}?(넣|젓|저어|썰|손질|다듬|담아|옮겨)",
+     "재료 투입·젓기·썰기·담기는 사람이 한다"),
+    (r"(넣어|저어|썰어|손질해|다듬어|담아|옮겨)\s*(준다|둔다|놓는다|드린다)",
+     "재료 투입·젓기·썰기·담기는 사람이 한다"),
+    (r"뚜껑을\s*(스스로|자동으로|알아서)?\s*(연다|닫는다|덮는다|열고|닫고|덮고)",
+     "뚜껑은 사람이 여닫는다 — 가전은 알려 줄 뿐이다"),
+    (r"(식기|그릇|냄비)[를을]?\s*[^.,]{0,6}?(넣는다|넣고|정리한다)",
+     "세척기에 식기를 넣는 것은 사람이다"),
+)
+
+# 조건 없이 말한 약속은 **결과에 그 일이 있었는지** 본다. 조건을 단
+# 문장("걸리면 바꾼다")은 약속이 아니라 판단 기준이라 여기서 보지 않는다.
+# (약속 문구, 확인할 지표, 지표 값이 맞아야 할 모양, 이름)
+CLAIMS = (
+    (r"저소음", "소음 조치", r"저소음으로 전환", "저소음으로 바꾼다"),
+    (r"주문(한다|해 둔다|해 놓|해 두|을 넣)", "자동 주문(원)", r"\d", "주문한다"),
+    (r"여열", "여열 마무리", r"여열", "여열로 마무리한다"),
+)
+CONDITIONAL = r"(면|경우|때만|되는 것|필요하면|있으면|걸리면|넘기면|모자라면)"
+
+
 def kitchen_capabilities(constraints: dict) -> list:
     """**이번 상황의 계획에 실제로 들어가는** 기능만 돌려준다.
 
@@ -311,9 +340,10 @@ def kitchen_capabilities(constraints: dict) -> list:
     flow = REGISTRY.get("flow_design").run(
         constraints=constraints, tasks=build_tasks(constraints),
         planner=_make_plan, goal=domain_goal(constraints)).output["flow"]
-    steps = set(flow["steps"])
-    return [{"skill": k, "can": v[0], "metrics": v[1]}
-            for k, v in KITCHEN_CAPS.items() if k in steps]
+    # **계획 순서대로** 돌려준다. 장면 시각이 이 순서를 거스르면 안 된다.
+    return [{"skill": k, "can": KITCHEN_CAPS[k][0], "metrics": KITCHEN_CAPS[k][1],
+             "step": i, "needs_person": k in NEEDS_PERSON}
+            for i, k in enumerate(flow["steps"]) if k in KITCHEN_CAPS]
 
 
 def domain_goal(constraints: dict) -> set:
@@ -374,7 +404,11 @@ def build_tasks(constraints: dict) -> list:
                 "prefer_items": ctx.get("urgent", []),
                 "require_complete": require_complete,
                 "avoid": avoid,
-                "resolve": resolve_stock}
+                "resolve": resolve_stock,
+                # 조달 단계와 **같은 기한**을 쓴다. 기한이 두 곳에서 다르면
+                # 고를 때는 된다던 것이 살 때 안 된다.
+                "arrival_min": lambda n: store.min_delivery_min(item=n),
+                "deadline_min": constraints.get("budget_min")}
 
     def _menu_absorb(ctx, out):
         best = out["best"]
@@ -459,10 +493,35 @@ def build_tasks(constraints: dict) -> list:
         # 시연에서는 사용자가 그 확인에 동의했다고 보고 진행한다.
         # 실제 제품에서는 여기서 멈추고 응답을 기다린다. 동의를 가정한 것이지
         # 자동으로 주문한 것이 아니며, 개입 횟수에는 그대로 남는다.
-        approved = [c["name"] for c in out["need_confirm"] if c["name"] in CATALOG]
-        for name in approved:
+        #
+        # **승인해도 물건은 배송 시간이 지나야 온다.** 전에는 승인 즉시 재고에
+        # 넣어서, 720분 뒤에 올 찹쌀로 오늘 삼계탕을 끓였다(2026-09-24 에 자동
+        # 주문 쪽에서 고친 것과 같은 버그가 승인 경로에 남아 있었다).
+        # 기한 안에 오는 것만 넣고, 기다린 시간을 더한다.
+        approved, late = [], []
+        deadline = constraints.get("budget_min")
+        pre = constraints.get("preorder")
+        for c in out["need_confirm"]:
+            name = c["name"]
+            if name not in CATALOG:
+                continue
+            a_eta = store.min_delivery_min(item=name)
+            if a_eta is None or (deadline is not None and a_eta > deadline):
+                late.append(f"{name}({'구할 곳 없음' if a_eta is None else f'{a_eta}분'})")
+                continue
             K.fridge_add(name, qty_for(name))
+            approved.append(name)
+            if not pre:
+                ctx["wait_for_delivery_min"] = max(
+                    ctx.get("wait_for_delivery_min", 0), a_eta)
         ctx["approved_after_ask"] = approved
+        ctx["late_after_ask"] = late
+        if approved and not pre and not out["auto_ordered"]:
+            ctx["delivery_note"] = (f"확인 후 주문한 것을 {ctx['wait_for_delivery_min']}분 "
+                                    f"기다린 뒤 조리를 시작한다")
+        elif approved and not pre:
+            ctx["delivery_note"] = (f"도착까지 {ctx['wait_for_delivery_min']}분 기다린 뒤 "
+                                    f"조리를 시작한다 (확인 후 주문 포함)")
 
     def _prep_bind(ctx):
         return {"record": ctx["record"], "weigh": K.prep_weigh,
@@ -901,7 +960,13 @@ def make_executor(registry, on_step=None, seed_ctx=None):
         if ctx.get("delivery_note"):
             metrics["조달 대기"] = ctx["delivery_note"]
         elif "procure" in {r["skill"] for r in log}:
-            metrics["조달 대기"] = "조달 불필요 — 필요한 것이 이미 다 있다"
+            # 확인 요청이 있었으면 "다 있다" 가 아니다 — p3 에서 찹쌀·미나리를
+            # 물어 놓고 이 문구가 나갔다.
+            metrics["조달 대기"] = ("조달 불필요 — 필요한 것이 이미 다 있다"
+                                if not ctx.get("need_confirm") else
+                                "기다림 없음 — 부족분은 확인 요청으로 넘겼다")
+        if ctx.get("late_after_ask"):
+            metrics["오늘 못 받음"] = ctx["late_after_ask"]
         if ctx.get("reheated"):
             metrics["재가열"] = ctx["reheated"]
         if ctx.get("recovered"):

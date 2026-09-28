@@ -359,6 +359,148 @@ def d8():
                 f"못 덮는다고 밝힘 {len(r1['design_report']['uncovered'])}건")
 
 
+# ── 8 LLM 이 준 값이 물리·요리까지 이어질 때 ────────────────────────────
+@check("LLM 이 준 재고 값을 계량·물리에 넣을 수 있는 형태로 만든다")
+def e1():
+    """'300g' 문자열이면 파이프라인이 예외로 죽었고, -200g 은 냄비에
+    음수 질량으로 들어갔고, '두부 한 모' 는 메뉴는 있다고 보고 계량은
+    못 찾았다(계량 실패). 호두·완두가 '호'·'완' 으로 잘리지 않는지도 본다."""
+    items, notes = thinq._clean_fridge([
+        {"name": "두부 한 모", "qty_g": "300g"}, {"name": "두부1모", "qty_g": 100},
+        {"name": "배추", "qty_g": -200, "stored_days": -3},
+        {"name": "호두"}, {"name": "완두"}, {"name": "배추 반 통"}])
+    got = {x["name"]: x["qty_g"] for x in items}
+    ok = (got.get("두부") == 400 and "호두" in got and "완두" in got
+          and got.get("배추") == 300          # 음수는 버리고 '반 통' 만 남는다
+          and any("불가능" in n for n in notes))
+    fake = json.dumps({"arrive_home": "19:00", "time_budget_min": 45,
+                       "fridge": [{"name": "두부 한 모"}, {"name": "배추 반 통"},
+                                  {"name": "된장"}]})
+    o = thinq.run("x", ask=lambda p: fake if "설계자" not in p else "")
+    m = o["result"]["verify"]["metrics"]
+    ok = ok and not m.get("계량 실패") and m.get("가열 시간(분)")
+    return ok, f"재고 {got} · 계량 실패 {m.get('계량 실패')}"
+
+
+@check("시·분 범위를 벗어난 시각을 거른다")
+def e2():
+    bad = [t for t in ("19:75", "25:00", "24:00") if thinq._is_clock(t)]
+    good = [t for t in ("07:05", "23:59", "0:00") if not thinq._is_clock(t)]
+    return not bad and not good, f"통과한 잘못된 시각 {bad} · 막힌 옳은 시각 {good}"
+
+
+@check("보관일을 모르면 임박 판단도 물 계산도 지어내지 않는다")
+def e3():
+    """전에는 모르는 보관일을 3일로 채웠다. 보관일은 계량 때 채소에서
+    나오는 물(하루 2%)까지 정하므로 **물 6% 를 지어내고** 있었다."""
+    import kitchen as K
+    from skills import REGISTRY
+    r = REGISTRY.get("inventory").run(items=[
+        {"name": "배추", "qty_g": 300, "stored_days": None, "shelf_life_days": None}])
+    K.reset([{"name": "배추", "qty_g": 300, "stored_days": None,
+              "shelf_life_days": None}], seed=7)
+    w = K.prep_weigh("배추", 200)
+    ok = r.output["count"] == 0 and w["expected_extra_water_g"] == 0
+    return ok, (f"임박 {r.output['count']}건 · 지어낸 물 "
+                f"{w['expected_extra_water_g']}g · {r.evidence[0][:30]}")
+
+
+@check("글루텐·유당·견과를 풀고, 아무것도 안 걸리는 말은 그렇다고 알린다")
+def e4():
+    from recipe_parse import expand_avoid
+    got = {a: expand_avoid([a])[0] for a in ("글루텐", "유당", "견과")}
+    o = thinq.run("x", ask=lambda p: json.dumps(
+        {"avoid": ["매운 것"]}) if "설계자" not in p else "")
+    ok = ("밀가루" in got["글루텐"] and "우유" in got["유당"]
+          and "호두" in got["견과"] and o["stopped"]
+          and "아무것도 거르지 않습니다" in o["explained"]["text"])
+    return ok, o["explained"]["text"][:80]
+
+
+def _llm_scenes(pid, *scenes):
+    import kitchen_domain as KD
+    sc = _scenes(*scenes)
+    import contextlib
+    import io
+    import run_design
+    from orchestrator import Trace
+    from llm_design import make_llm_beats
+    fac = (lambda fo: make_llm_beats(lambda p: sc, KD.kitchen_capabilities,
+                                     KD.kitchen_beats, fo,
+                                     human_only=KD.HUMAN_ONLY, claims=KD.CLAIMS,
+                                     conditional=KD.CONDITIONAL))
+    with contextlib.redirect_stdout(io.StringIO()):
+        return run_design.design_for(pid, Trace(), beats_factory=fac)
+
+
+@check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
+def e5():
+    """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""
+    r = _llm_scenes("p1_야근",
+                    (5, "x", "재료를 자동으로 넣어 준다", "converge", [1]),
+                    (5, "x", "뚜껑을 스스로 닫는다", "converge", [1]),
+                    (5, "x", "화력을 스스로 맞추고 손이 필요할 때만 알린다",
+                     "converge", [1]))
+    rep = r["design_report"]
+    ok = len(rep["rejected"]) == 2 and len(rep["accepted"]) == 1
+    return ok, f"버림 {len(rep['rejected'])} · 받음 {len(rep['accepted'])}"
+
+
+@check("사람 손이 필요한 단계는 선제 주문이어도 귀가 전에 놓지 않는다")
+def e6():
+    r = _llm_scenes("p4_퇴근길",
+                    (-30, "퇴근길", "부족분을 판단해 산다", "procure", [0]),
+                    (-20, "x", "재료를 계량해 둔다", "prep", []),
+                    (-10, "x", "화력을 맞춘다", "converge", []))
+    at = {b["verified_by"]: b["at"] for b in r["scenario"]["beats"]
+          if b.get("source") == "LLM"}
+    ok = at["procure"] < "19:20" and at["prep"] >= "19:20" and at["converge"] >= "19:20"
+    return ok, f"시각 {at} (귀가 19:20)"
+
+
+@check("장면 시각이 계획 순서를 거스르면 앞 단계를 당기거나 뒤를 민다")
+def e7():
+    """p4 에서 메뉴를 귀가 시각, 주문을 30분 전에 두면 **메뉴를 당겨야**
+    한다. 처음엔 주문을 귀가 뒤로 밀어 선제 주문의 뜻이 사라졌다."""
+    r = _llm_scenes("p4_퇴근길",
+                    (-30, "퇴근길", "부족분을 판단해 산다", "procure", [0]),
+                    (0, "들어온다", "메뉴를 골라 둔다", "menu", [1]))
+    at = {b["verified_by"]: b["at"] for b in r["scenario"]["beats"]
+          if b.get("source") == "LLM"}
+    r2 = _llm_scenes("p1_야근",
+                     (0, "x", "화력을 맞춘다", "converge", []),
+                     (10, "x", "메뉴를 골라 둔다", "menu", [1]))
+    at2 = {b["verified_by"]: b["at"] for b in r2["scenario"]["beats"]
+           if b.get("source") == "LLM"}
+    ok = at["menu"] == at["procure"] == "18:50" and at2["converge"] >= at2["menu"]
+    return ok, f"p4 {at} · p1 {at2}"
+
+
+@check("조건 없이 한 약속은 결과로 확인하고, 조건을 단 문장은 기준으로 둔다")
+def e8():
+    """"저소음으로 돌린다" 고 했는데 결과가 '이미 조용하다' 면 그 장면은
+    일어나지 않은 것이다. "넘기면 바꾼다" 는 약속이 아니라 판단 기준이다."""
+    r = _llm_scenes("p1_야근",
+                    (45, "x", "세척기를 저소음으로 돌린다", "aftercare", [2]))
+    r2 = _llm_scenes("p1_야근",
+                     (45, "x", "소음 시각을 넘기면 저소음으로 바꾼다",
+                      "aftercare", [2]))
+    un = [c["why"] for c in r["verify"]["beat_check"] if not c["ok"]]
+    un2 = [c["why"] for c in r2["verify"]["beat_check"] if not c["ok"]]
+    ok = any("저소음" in w for w in un) and not un2
+    return ok, (un[0][:70] if un else "안 잡음")
+
+
+@check("입력에 있던 수는 장면에 써도 된다")
+def e9():
+    r = _llm_scenes("p1_야근",
+                    (0, "혼자 먹는다", "1인분 기준으로 메뉴를 골라 둔다", "menu", [0]),
+                    (0, "x", "3인분 기준으로 메뉴를 골라 둔다", "menu", [0]))
+    rep = r["design_report"]
+    ok = len(rep["accepted"]) == 1 and "3" in rep["rejected"][0]
+    return ok, f"받음 {rep['accepted']} · 버림 {len(rep['rejected'])}"
+
+
 # ── 진짜 호출 : --live 일 때만 ─────────────────────────────────────────
 # 매번 돌리면 느리고 비용이 든다. 기본은 가짜 LLM 으로 구조만 보고,
 # 진짜 호출은 손으로 켤 때만 한다.

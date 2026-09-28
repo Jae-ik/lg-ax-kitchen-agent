@@ -24,6 +24,11 @@ class InventorySkill(Skill):
     def run(self, items: list, urgency_ratio: float = 0.6, **_) -> SkillResult:
         scored, ev, expired = [], [], []
         for i in items:
+            # 보관일·수명을 모르면 **판단하지 않는다.** 모르는 값을 3일·7일로
+            # 채우면 임박 여부가 그 가정으로 정해진다.
+            if i.get("stored_days") is None or i.get("shelf_life_days") is None:
+                ev.append(f"{i['name']} 보관일·수명을 모름 — 임박 판단에서 뺀다")
+                continue
             life = max(1, i.get("shelf_life_days", 7))
             r = i.get("stored_days", 0) / life
             left = life - i.get("stored_days", 0)
@@ -67,6 +72,9 @@ class MenuSkill(Skill):
         "avoid": "list[str]               들어가면 안 되는 재료",
         "resolve": "(재료명, 재고) -> 재고명 | None   같은 것을 다르게 부르는 "
                    "이름을 푼다(두부/연두부). 무엇이 같은지는 도메인이 안다",
+        "arrival_min": "(재료명) -> int | None   지금 주문하면 몇 분 뒤에 오는가. "
+                       "None 이면 구할 수 없다. 주입받는다",
+        "deadline_min": "int | None   부족분이 이 시간 안에 와야 오늘 만들 수 있다",
     }
     reusable_for = ["조리 기록", "세탁 코스 기록", "청소 루틴 기록"]
     # 공개 자료(recipe_source)를 나중에 붙이면서 Task 만 고치고 여기를
@@ -76,7 +84,8 @@ class MenuSkill(Skill):
 
     def run(self, records: list, stock: list, prefer_items: list | None = None,
             require_complete: bool = False, avoid: list | None = None,
-            resolve=None, **_) -> SkillResult:
+            resolve=None, arrival_min=None, deadline_min: int | None = None,
+            **_) -> SkillResult:
         have = {s["name"]: s for s in stock}
         prefer = set(prefer_items or [])
         avoid = set(avoid or [])
@@ -126,6 +135,23 @@ class MenuSkill(Skill):
                 ev.append(f"{r['record_id']}({r['menu']}) 제외 — 재고만으로 불가"
                           f" (부족 {', '.join(missing)})")
                 continue
+
+            # **오늘 안에 못 구하는 재료가 필요한 후보는 뺀다.** 전에는 부족분을
+            # 점수 3점 감점으로만 다뤄서, 12시간 뒤에 오는 찹쌀이 필요한 삼계탕을
+            # 골랐다. 조달 단계가 "제때 못 온다" 고 묻고, 시뮬레이터는 승인을
+            # 가정해 찹쌀을 그 자리에 넣었다 — 없는 찹쌀로 끓이고, 찹쌀이
+            # 빨아들일 물 1090g 까지 더 부었다. 고를 때 막아야 뒤가 거짓말을 안 한다.
+            if arrival_min is not None and deadline_min is not None and missing:
+                late = []
+                for n in missing:
+                    eta = arrival_min(n)
+                    if eta is None or eta > deadline_min:
+                        late.append(f"{n}({'구할 곳 없음' if eta is None else f'{eta}분'})")
+                if late:
+                    dropped.append(r["record_id"])
+                    ev.append(f"{r['record_id']}({r['menu']}) 제외 — 오늘 안에 못 구함: "
+                              f"{', '.join(late)} > 남은 {deadline_min}분")
+                    continue
 
             score = len(uses) * 10 - len(missing) * 3 + r.get("satisfaction", 0)
             out.append({"record_id": r["record_id"], "menu": r["menu"],

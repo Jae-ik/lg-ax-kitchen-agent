@@ -16,7 +16,11 @@ import time
 EXPECT = {
     "p1_야근":    {"steps": 6, "touches": 0, "beats": "4/4", "cooked": True},
     "p2_맞벌이":  {"steps": 7, "touches": 0, "beats": "4/4", "cooked": True},
-    "p3_알레르기": {"steps": 7, "touches": 2, "beats": "5/5", "cooked": True},
+    # p3 개입 2 → 0 (2026-09-28): 전에는 720분 뒤에 올 찹쌀이 필요한 삼계탕을
+    # 고르고, 확인 2건을 승인한 것으로 보고 **찹쌀을 즉시 재고에 넣었다.**
+    # 메뉴 단계가 "오늘 안에 못 구하는 재료" 를 보게 고치자 삼계탕이 빠지고
+    # 된장찌개(즉시배송 20분 대기)가 됐다. 확인할 것이 없어져 개입이 0 이다.
+    "p3_알레르기": {"steps": 7, "touches": 0, "beats": "5/5", "cooked": True},
     "p4_퇴근길":  {"steps": 7, "touches": 0, "beats": "4/4", "cooked": True},
 }
 SKIP_OK = {"procure"}          # 확인 요청은 실패가 아니라 설계된 정지

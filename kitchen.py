@@ -248,7 +248,8 @@ def prep_weigh(name: str, target_g: int, consume: bool = True):
     WATERY = {"배추", "애호박", "무", "양파", "버섯"}
     if name in WATERY:
         # 보관이 길수록 조직이 무너져 물이 더 나온다 (무게에 비례)
-        extra_water = round(actual * 0.02 * min(item["stored_days"], 7), 1)
+        # 보관일을 모르면 0 으로 본다 — 모르는 물을 지어내지 않는다
+        extra_water = round(actual * 0.02 * min(item.get("stored_days") or 0, 7), 1)
     else:
         extra_water = 0.0
     return {"ok": True, "name": name, "target_g": target_g,

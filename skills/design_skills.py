@@ -13,6 +13,7 @@ experience_verify 가 주입받은 실행 함수로 그것을 돌려 검증한�
 스킬끼리 서로를 import 하지 않는다. 실행 함수는 주입받는다.
 """
 from __future__ import annotations
+import re
 from typing import Callable
 
 from .base import Skill, SkillResult
@@ -326,6 +327,15 @@ class ExperienceVerifySkill(Skill):
                 hit, why = False, (f"{need} 은 성공했지만 결과에 "
                                    f"{' 또는 '.join(any_of)} 가 없다 — "
                                    f"장면이 말한 일이 일어나지 않았다")
+            elif b.get("expect_value") and not re.search(
+                    b["expect_value"]["pattern"],
+                    str(m.get(b["expect_value"]["metric"], ""))):
+                # 장면이 조건 없이 "저소음으로 바꾼다" 고 했는데 결과는
+                # "소음 조치 불필요" 인 경우. 지표가 있다고 약속이 지켜진 것은 아니다.
+                ev_ = b["expect_value"]
+                hit, why = False, (f"장면은 '{ev_['claim']}' 고 했지만 결과의 "
+                                   f"{ev_['metric']} 는 "
+                                   f"'{str(m.get(ev_['metric'], '없음'))[:40]}'")
             else:
                 hit = True
                 why = (f"{need} 실행 성공, {found[0]}={m[found[0]]}" if found

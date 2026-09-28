@@ -38,10 +38,17 @@ COUNT_SUFFIX = re.compile(
     r"\s*\d+(?:\.\d+)?\s*"
     r"(개|마리|장|알|쪽|톨|뿌리|줄기|컵|큰술|작은술|봉|팩|공기|인분|모|송이|단)?$")
 JUNK = {"", "물", "약간", "적당량"}
+# 레시피 원문의 **소제목**이 첫 재료에 붙어 남는다 — "[재료] 굴 50g" 이
+# '재료 굴' 이 되는 식이다. 자료 100건에서 56종이었고, 상점에서 '재료 굴' 을
+# 찾으니 "구할 곳 없음" 이 됐다. 소제목 한 단어(…재료·…양념·…육수·…소스
+# ·고명·드레싱·반죽·완자, …용) 뒤에 이름이 이어질 때만 뗀다.
+SECTION = re.compile(
+    r"^(?:\S*(?:재료|양념장|양념|육수|소스|고명|드레싱|반죽)|완자|\S+용)\s+(?=\S)")
 
 
 def clean(name: str) -> str:
-    name = PREFIX.sub("", name.strip()).strip()
+    name = SECTION.sub("", name.strip()).strip()
+    name = PREFIX.sub("", name).strip()
     name = COUNT_SUFFIX.sub("", name).strip()
     return re.sub(r"\s+", " ", name)
 
@@ -161,6 +168,13 @@ CATEGORY["우유류"] = CATEGORY["유제품"]
 CATEGORY["해산물"] = (CATEGORY["갑각류"] + CATEGORY["조개류"]
                      + CATEGORY["생선류"] + CATEGORY["두족류"])
 CATEGORY["해물"] = CATEGORY["해산물"]
+# 글루텐은 밀에 든 단백질이다. 간장·고추장은 대개 밀을 넣어 만든다 —
+# 제품마다 달라 **확실하지 않지만** 안전 판정이므로 거르는 쪽에 둔다.
+CATEGORY["글루텐"] = ("밀", "밀가루", "부침가루", "튀김가루", "빵가루", "국수",
+                     "칼국수", "라면", "파스타", "빵", "간장", "고추장")
+CATEGORY["밀가루"] = ("밀가루", "부침가루", "튀김가루", "빵가루")
+CATEGORY["유당"] = CATEGORY["유제품"]
+CATEGORY["견과"] = CATEGORY["견과류"]
 
 
 def expand_avoid(avoid) -> tuple[list[str], list[str], list[str]]:

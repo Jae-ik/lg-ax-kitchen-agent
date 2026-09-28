@@ -49,6 +49,8 @@ def scenario_kitchen(trace):
         trace.stage("OUTPUT", "사용자 확인이 필요한 항목이 있어 멈춘다",
                     proc.output["need_confirm"])
     ordered = {a["name"] for a in proc.output["auto_ordered"]}
+    # 이 데모는 시간을 재지 않는다 — 주문한 것이 **도착했다고 보고** 재고에
+    # 넣는다(가정). 시간까지 재는 경로는 kitchen_domain 이 배송을 기다린다.
     for name in ordered:                      # 주문한 품목을 재고에 반영
         need = next((i["qty_g"] for i in rec["ingredients"] if i["name"] == name), 150)
         K.fridge_add(name, need)

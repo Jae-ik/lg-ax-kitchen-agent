@@ -118,7 +118,7 @@ def make_lookup(stores=None):
     return lookup
 
 
-def min_delivery_min(stores=None, item: str | None = None) -> int:
+def min_delivery_min(stores=None, item: str | None = None) -> int | None:
     """가장 빠른 배송 시간. 상황 판단에서 '조달에 걸리는 시간' 으로 쓴다.
 
     품목을 주면 **그 품목을 실제로 취급하는** 상점만 본다. 예전에는 품목을
@@ -129,4 +129,6 @@ def min_delivery_min(stores=None, item: str | None = None) -> int:
         return min((s.delivery_min for s in stores), default=0)
     fit = [s.delivery_min for s in stores
            if s.lookup(item) and s.lookup(item).in_stock]
-    return min(fit, default=0)
+    # 아무 상점도 안 파는 품목은 **구할 수 없다**(None). 전에는 default=0 이라
+    # "0분에 도착" 으로 읽혔다 — 가장 빠른 것처럼 보이는 가장 느린 경우다.
+    return min(fit, default=None)
