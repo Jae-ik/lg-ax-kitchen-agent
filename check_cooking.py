@@ -362,27 +362,124 @@ def c15():
                 + (str(odd) if odd else "없음"))
 
 
-@check("오늘 안에 못 구하는 재료가 필요한 메뉴는 고르지 않는다")
+@check("오늘 안에 못 구하는 재료가 필요한 메뉴는 고르지 않고, 산 것은 도착을 기다린다")
 def c_late():
-    """p3 는 720분 뒤에 올 찹쌀이 필요한 삼계탕을 골랐고, 확인을 승인한
-    것으로 보고 **찹쌀을 즉시 재고에 넣었다.** 그 찹쌀이 빨아들일 물
-    1090g 까지 더 부었다. 고를 때 막고, 승인한 것도 배송 시간을 기다린다."""
+    """p3 는 720분 뒤에 올 찹쌀로 삼계탕을 끓이고 있었다 — 확인을 승인한
+    것으로 보고 **찹쌀을 즉시 재고에 넣었다.** 결과 하나(어떤 메뉴냐)가
+    아니라 성질을 본다. 메뉴는 상점 목록에 따라 달라지기 때문이다.
+
+      1 메뉴 스킬: 오늘 못 오는 재료가 필요한 후보는 뺀다
+      2 파이프라인: 승인해서 산 것은 기한 안에 오고, 그 시간을 기다린다
+      3 상점: 아무도 안 파는 것·주류는 '없음' 이지 0분이 아니다
+    """
     import contextlib
     import run_design
     import store
     from orchestrator import Trace
+    from skills import REGISTRY
+    rec = {"record_id": "pub_x", "menu": "삼계탕", "ingredients": [
+        {"name": "닭고기", "qty_g": 120}, {"name": "찹쌀", "qty_g": 100}]}
+    r = REGISTRY.get("menu").run(
+        records=[rec], stock=[{"name": "닭고기", "qty_g": 500}],
+        arrival_min=lambda n: 720, deadline_min=60)
+    one = not r.output["candidates"] and any("못 구함" in e for e in r.evidence)
+
     with contextlib.redirect_stdout(io.StringIO()):
-        r = run_design.design_for("p3_알레르기", Trace(), seed=7)
+        res = run_design.design_for("p3_알레르기", Trace(), seed=7)
+    m = res["verify"]["metrics"]
+    bought = m.get("확인 후 승인") or []
+    etas = [store.min_delivery_min(item=n) for n in bought]
+    two = (all(e is not None and e <= 60 for e in etas)
+           and (not bought or "기다린" in str(m.get("조달 대기"))))
+    three = (store.min_delivery_min(item="없는재료") is None
+             and store.min_delivery_min(item="화이트와인") is None)
+    return one and two and three, (
+        f"720분 재료 후보 {'뺌' if one else '남음'} · p3 승인 {bought} 도착 {etas}분 · "
+        f"{m.get('조달 대기')} · 와인 {store.min_delivery_min(item='화이트와인')}")
+
+
+@check("이 조리기로 하지 않는 조리법(주스·샐러드·튀김)은 후보가 아니다")
+def c_method():
+    """냄비에서 끓여 졸이는 물리만 있는데, 주스를 0.95 까지 끓이고 튀김을
+    100도에서 끓이는 후보가 올라와 있었다(p3 3순위가 당근 오렌지 주스)."""
+    import kitchen_domain as kd
+    from skills import REGISTRY
+    recs = [kd.recipe_to_record(r) for r in kd.load_recipes()["recipes"]]
+    r = REGISTRY.get("menu").run(records=recs, stock=[], fits=kd.fits_device)
+    left = {c["record_id"] for c in r.output["candidates"]}
+    methods = {x["method"] for x in recs if x["record_id"] in left}
+    own = REGISTRY.get("menu").run(records=[{"record_id": "rec_x", "menu": "찌개",
+                                             "ingredients": []}], stock=[],
+                                   fits=kd.fits_device).output["candidates"]
+    ok = methods <= kd.DEVICE_METHODS and bool(left) and bool(own)
+    return ok, f"남은 후보 {len(left)}건의 조리법 {methods} · 내 기록은 통과"
+
+
+@check("오늘 안 쓰면 버리는 재료를 쓰는 후보가 먼저이고, 없으면 알린다")
+def c_must():
+    from skills import REGISTRY
+    stock = [{"name": "닭고기", "qty_g": 500}, {"name": "된장", "qty_g": 500}]
+    a = {"record_id": "a", "menu": "된장국", "satisfaction": 5,
+         "ingredients": [{"name": "된장", "qty_g": 50}]}
+    b = {"record_id": "b", "menu": "닭곰탕", "satisfaction": 0,
+         "ingredients": [{"name": "닭고기", "qty_g": 300}, {"name": "대파", "qty_g": 20}]}
+    r1 = REGISTRY.get("menu").run(records=[a, b], stock=stock, must_use=["닭고기"])
+    r2 = REGISTRY.get("menu").run(records=[a], stock=stock, must_use=["닭고기"])
+    ok = (r1.output["best"]["record_id"] == "b" and not r1.output["must_use_unmet"]
+          and r2.output["must_use_unmet"] == ["닭고기"])
+    return ok, (f"점수로는 된장국이 높아도 {r1.output['best']['menu']} · "
+                f"쓸 후보가 없으면 알림 {r2.output['must_use_unmet']}")
+
+
+@check("별칭으로 찾은 재료는 재고 이름으로 계량한다")
+def c_alias():
+    """메뉴는 '닭가슴살' 을 재고의 '닭고기' 로 찾는데(부분 일치) 계량은
+    정확한 이름으로 찾아 '재고 없음' 으로 실패했다."""
+    import contextlib
+    import copy
+    import personas
+    import run_design
+    from orchestrator import Trace
+    p = copy.deepcopy(personas.get("p1_야근"))
+    p["id"] = "alias_test"
+    p["fridge"] = [{"name": "닭고기", "qty_g": 800, "stored_days": 1,
+                    "shelf_life_days": 3}, {"name": "양파", "qty_g": 300,
+                    "stored_days": 1, "shelf_life_days": 14}]
+    personas.PERSONAS["alias_test"] = p
+    import kitchen as K
+    saved = dict(K._RECORDS_DEFAULT)
+    K._RECORDS_DEFAULT.clear()
+    K._RECORDS_DEFAULT["rec_a"] = {
+        "record_id": "rec_a", "menu": "닭가슴살 양파국", "servings": 1,
+        "saved_by": "테스트", "satisfaction": 5, "initial_mass_g": 700,
+        "target_mass_ratio": 0.85, "soil_score": 0.3,
+        "ingredients": [{"name": "닭가슴살", "qty_g": 200},
+                        {"name": "양파", "qty_g": 100}, {"name": "물", "qty_g": 400}]}
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = run_design.design_for("alias_test", Trace(), seed=7)
+    finally:
+        K._RECORDS_DEFAULT.clear()
+        K._RECORDS_DEFAULT.update(saved)
+        del personas.PERSONAS["alias_test"]
     m = r["verify"]["metrics"]
-    ev = [e for s_ in r["verify"]["execution"] if s_["skill"] == "menu"
-          for e in (s_.get("evidence") or [])]
-    ok = (m.get("사용한 기록") != "pub_639"
-          and "찹쌀" not in str(m.get("확인 후 승인"))
-          and not str(m.get("물 보충", "")).startswith("재료가 빨아들일 1090")
-          and store.min_delivery_min(item="없는재료") is None)
-    return ok, (f"메뉴 {m.get('메뉴')}({m.get('사용한 기록')}) · 조달 "
-                f"{m.get('조달 대기')} · 없는 품목 배송 "
-                f"{store.min_delivery_min(item='없는재료')}")
+    ok = m.get("사용한 기록") == "rec_a" and not m.get("계량 실패") and m.get("가열 시간(분)")
+    return ok, f"{m.get('메뉴')} · 계량 실패 {m.get('계량 실패')} · 가열 {m.get('가열 시간(분)')}분"
+
+
+@check("파이프라인이 읽는 레시피 재료가 지금의 파서 결과와 같다")
+def c_cache():
+    """캐시의 ingredients 는 수집 당시 파서로 풀어 둔 것이라, 그 뒤 고친
+    파싱(생강→'강' 방지, 소제목 떼기)이 파이프라인에 **한 번도 닿지 않았다.**
+    파서 시험은 통과했지만 파이프라인은 옛 결과를 읽고 있었다."""
+    import kitchen_domain as kd
+    import recipe_parse as R
+    rs = kd.load_recipes()["recipes"]
+    bad = [r["recipe_id"] for r in rs if r.get("parts_raw")
+           and r["ingredients"] != R.parse_ingredients(r["parts_raw"])]
+    names = {i["name"] for r in rs for i in r["ingredients"]}
+    ok = not bad and "강" not in names and not any(n.startswith("재료 ") for n in names)
+    return ok, f"어긋난 레시피 {len(bad)}건 · '강' {'있음' if '강' in names else '없음'}"
 
 
 @check("같은 재료가 두 번 나오면 합친다")

@@ -75,6 +75,9 @@ class MenuSkill(Skill):
         "arrival_min": "(재료명) -> int | None   지금 주문하면 몇 분 뒤에 오는가. "
                        "None 이면 구할 수 없다. 주입받는다",
         "deadline_min": "int | None   부족분이 이 시간 안에 와야 오늘 만들 수 있다",
+        "fits": "(record) -> str | None   이 기기로 만들 수 없으면 그 이유. "
+                "주입받는다 — 무엇이 맞는지는 도메인(기기)이 안다",
+        "must_use": "list[str]   오늘 안 쓰면 버리는 것. 이것을 쓰는 후보를 먼저 본다",
     }
     reusable_for = ["조리 기록", "세탁 코스 기록", "청소 루틴 기록"]
     # 공개 자료(recipe_source)를 나중에 붙이면서 Task 만 고치고 여기를
@@ -85,7 +88,8 @@ class MenuSkill(Skill):
     def run(self, records: list, stock: list, prefer_items: list | None = None,
             require_complete: bool = False, avoid: list | None = None,
             resolve=None, arrival_min=None, deadline_min: int | None = None,
-            **_) -> SkillResult:
+            fits=None, must_use: list | None = None, **_) -> SkillResult:
+        must = set(must_use or [])
         have = {s["name"]: s for s in stock}
         prefer = set(prefer_items or [])
         avoid = set(avoid or [])
@@ -128,6 +132,15 @@ class MenuSkill(Skill):
                           f"재료 포함: {', '.join(blocked)}")
                 continue
 
+            # **이 기기로 만들 수 없는 조리법은 뺀다.** 전에는 주스·샐러드·튀김도
+            # 냄비에서 질량비 목표까지 졸이는 것으로 조리했다 — 주스를 0.95 까지
+            # 끓이고, 튀김을 100도에서 끓이는 셈이었다.
+            why_not = fits(r) if fits else None
+            if why_not:
+                dropped.append(r["record_id"])
+                ev.append(f"{r['record_id']}({r['menu']}) 제외 — {why_not}")
+                continue
+
             # 재고만으로 끝내야 하는 상황이면 부족분이 있는 후보를 아예 뺀다.
             # 조달을 생략하기로 한 것은 상황 판단이고, 그 판단이 여기까지 전해진다.
             if require_complete and missing:
@@ -154,7 +167,9 @@ class MenuSkill(Skill):
                     continue
 
             score = len(uses) * 10 - len(missing) * 3 + r.get("satisfaction", 0)
+            saves = [n for n in names if (held(n) or "") in must]
             out.append({"record_id": r["record_id"], "menu": r["menu"],
+                        "saves": saves,
                         "saved_by": r.get("saved_by"), "missing": missing,
                         "short_g": short,
                         "uses_urgent": uses, "blocked": [], "score": score})
@@ -163,7 +178,15 @@ class MenuSkill(Skill):
             if short:
                 ev.append("  수량 부족(이름은 있으나 모자람): "
                           + ", ".join(f"{k} {v}g" for k, v in short.items()))
-        out.sort(key=lambda x: -x["score"])
+        # **오늘 안 쓰면 버리는 재료를 쓰는 후보가 먼저다.** 점수에 섞지 않고
+        # 자격으로 먼저 가른다(2026-09-24: 자격을 거른 뒤 점수로 정렬한다).
+        # 점수로만 보면 부족분 몇 개의 감점이 "버림" 을 이긴다.
+        out.sort(key=lambda x: (-bool(x["saves"]), -x["score"]))
+        best_saves = set(out[0]["saves"]) if out else set()
+        unmet_must = sorted(must - best_saves)
+        if unmet_must:
+            ev.append(f"오늘 안 쓰면 버리는 {', '.join(unmet_must)} 를 쓰는 실행 가능한 "
+                      f"후보가 없다 — 알려서 보관 방법을 바꾸게 한다")
         # 실패했을 때 "마지막 로그 줄" 이 사유로 읽히면 장황하고 부정확하다.
         # 왜 후보가 하나도 안 남았는지를 스킬이 직접 요약한다.
         recovery = None
@@ -182,6 +205,7 @@ class MenuSkill(Skill):
             ev.append(recovery)
         return SkillResult(bool(out), {"candidates": out, "dropped": dropped,
                                        "recovery": recovery,
+                                       "must_use_unmet": unmet_must,
                                        "best": out[0] if out else None}, ev)
 
 

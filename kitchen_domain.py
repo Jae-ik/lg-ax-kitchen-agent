@@ -152,7 +152,16 @@ def load_recipes() -> dict:
     if not RECIPE_CACHE.exists():
         return {"source": "(캐시 없음 — python fetch_data.py 를 먼저 실행)",
                 "key_used": "-", "recipes": []}
-    return json.loads(RECIPE_CACHE.read_text(encoding="utf-8"))
+    d = json.loads(RECIPE_CACHE.read_text(encoding="utf-8"))
+    # **재료는 원문(parts_raw)에서 매번 다시 푼다.** 캐시의 ingredients 는
+    # 수집할 때의 파서로 풀어 둔 것이라, 그 뒤 고친 파싱(간장→장·생강→강
+    # 방지, 소제목 떼기, 표기 통일)이 파이프라인에 **한 번도 닿지 않았다.**
+    # 파싱 함수 시험은 통과했는데 파이프라인은 옛 결과를 읽고 있었다.
+    from recipe_parse import parse_ingredients
+    for r in d.get("recipes", []):
+        if r.get("parts_raw"):
+            r["ingredients"] = parse_ingredients(r["parts_raw"])
+    return d
 
 
 def recipe_to_record(r: dict) -> dict:
@@ -164,6 +173,7 @@ def recipe_to_record(r: dict) -> dict:
     ratio, soil = METHOD_DEFAULT.get(r.get("method"), METHOD_DEFAULT["기타"])
     total = sum(i["qty_g"] for i in r["ingredients"])
     return {"record_id": f"pub_{r['recipe_id']}", "menu": r["menu"],
+            "method": r.get("method"),
             "saved_by": "공개 레시피", "ingredients": r["ingredients"],
             "initial_mass_g": round(total), "target_mass_ratio": ratio,
             "cook_minutes_observed": None, "soil_score": soil,
@@ -181,6 +191,21 @@ KNOWN_ITEMS = ["두부", "대파", "간장", "된장", "닭고기", "양파", "�
                "감자", "달걀", "배추", "애호박",
                "참기름", "식용유", "설탕", "소금", "고춧가루", "식초", "밀가루"]
 AUTO_LIMIT_KRW = 15000                                # 1회 자동 주문 상한
+
+# 이 조리기가 하는 조리법. 시뮬레이터(converge)는 **냄비에서 끓여 졸이는**
+# 물리만 다룬다 — 굽기·튀기기·찌기·무조리(샐러드·주스)는 온도·열전달이 달라
+# 이 모델로 조리하면 거짓이 된다. 내 기록은 이 기기로 만든 것이라 맞는다고 본다.
+DEVICE_METHODS = {"끓이기"}
+
+
+def fits_device(rec: dict):
+    m = rec.get("method")
+    if m is None or m in DEVICE_METHODS:
+        return None
+    return f"이 조리기로 하지 않는 조리법({m}) — 냄비에서 끓이는 것만 다룬다"
+
+
+MUST_USE_DAYS = 1       # 남은 날이 이 이하면 오늘 안 쓰면 버린다고 본다
 
 
 # 주방에서 쓰는 말. situation_read 의 근거 문장이 이 말을 쓴다.
@@ -284,8 +309,12 @@ KITCHEN_CAPS = {
                   ["가장 급한 재료"]),
     "menu": ("저장된 조리 기록과 공개 레시피 중 재고·못 먹는 재료·시간에 맞는 "
              "메뉴를 고른다. 못 먹는 재료가 든 후보는 미리 뺀다", ["메뉴"]),
-    "procure": ("부족한 재료를 이전 구매 이력·금액 상한·못 먹는 재료 기준으로 "
-                "판단해 주문하거나, 판단이 안 되는 것만 고객에게 묻는다",
+    # 떨어진 상비품(양념)도 조달 대상이다(_procure_bind 의 pantry_refill).
+    # 처음엔 이 설명에서 빠져, 진짜 LLM 이 p4 의 "양념이 떨어진 걸 조리 중에
+    # 발견하는 일" 을 "양념은 추적 대상이 아니다" 며 못 덮는다고 했다.
+    "procure": ("냉장고 부족분과 **떨어진 양념·상비품**을 함께 모아, 이전 구매 "
+                "이력·금액 상한·못 먹는 재료 기준으로 판단해 주문하거나, 판단이 "
+                "안 되는 것만 고객에게 묻는다",
                 ["조달 대기", "확인 요청"]),
     "prep": ("먹는 사람 수와 조리기 용량에 맞춰 넣을 양을 정하고 계량을 안내한다",
              ["조리량"]),
@@ -383,6 +412,8 @@ def build_tasks(constraints: dict) -> list:
 
     def _inventory_absorb(ctx, out):
         ctx["urgent"] = [i["name"] for i in out["urgent"]]
+        ctx["must_use"] = [i["name"] for i in out["urgent"]
+                           if i["days_left"] <= MUST_USE_DAYS]
         ctx["days_left"] = min((i["days_left"] for i in out["urgent"]), default=99)
         # 수명이 지난 것은 재고에서 뺀다. 목록에서 빼기만 하고 재고에 남겨 두면
         # 메뉴 단계가 그대로 찾아 쓴다.
@@ -408,9 +439,12 @@ def build_tasks(constraints: dict) -> list:
                 # 조달 단계와 **같은 기한**을 쓴다. 기한이 두 곳에서 다르면
                 # 고를 때는 된다던 것이 살 때 안 된다.
                 "arrival_min": lambda n: store.min_delivery_min(item=n),
-                "deadline_min": constraints.get("budget_min")}
+                "deadline_min": constraints.get("budget_min"),
+                "fits": fits_device,
+                "must_use": ctx.get("must_use", [])}
 
     def _menu_absorb(ctx, out):
+        ctx["must_use_unmet"] = out.get("must_use_unmet", [])
         best = out["best"]
         if best is None:
             ctx["record"] = None
@@ -433,9 +467,25 @@ def build_tasks(constraints: dict) -> list:
             ctx["scale_capped"] = scaled.get("capped_by_device")
             ctx["record"] = scaled
 
+        # **재료 이름을 재고 이름으로 바꿔 둔다.** 메뉴는 별칭으로 '닭가슴살'
+        # 을 재고의 '닭고기' 로 찾는데(부분 일치), 계량은 정확한 이름으로
+        # 찾는다. 바꾸지 않으면 메뉴는 "있다" 고 하고 계량은 "재고 없음" 으로
+        # 실패했다 — 공개 레시피가 뽑히면 반드시 타는 경로였다.
+        # 같은 재고로 모이는 재료(대파·쪽파 → 대파)는 양을 합친다.
+        stock = {s["name"]: s for s in K.fridge_list_items()}
+        merged = {}
+        for ing in ctx["record"].get("ingredients", []):
+            key = resolve_stock(ing["name"], stock) or ing["name"]
+            if key in merged:
+                merged[key]["qty_g"] += ing["qty_g"]
+            else:
+                merged[key] = dict(ing, name=key,
+                                   **({"as_written": ing["name"]}
+                                      if key != ing["name"] else {}))
+        ctx["record"] = dict(ctx["record"], ingredients=list(merged.values()))
+
         # 인원에 맞춰 양이 바뀌었으니 부족분도 그 양으로 다시 본다.
         need = ctx["record"].get("ingredients", [])
-        stock = {s["name"]: s for s in K.fridge_list_items()}
         miss = []
         for ing in need:
             key = resolve_stock(ing["name"], stock)
@@ -967,6 +1017,10 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                                 "기다림 없음 — 부족분은 확인 요청으로 넘겼다")
         if ctx.get("late_after_ask"):
             metrics["오늘 못 받음"] = ctx["late_after_ask"]
+        if ctx.get("must_use_unmet"):
+            metrics["오늘 못 쓰는 임박 재료"] = (
+                f"{', '.join(ctx['must_use_unmet'])} — 오늘 만들 수 있는 메뉴 중 "
+                f"쓰는 것이 없다. 냉동 보관을 권한다")
         if ctx.get("reheated"):
             metrics["재가열"] = ctx["reheated"]
         if ctx.get("recovered"):
@@ -1057,7 +1111,11 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                 f"지금 있는 것({', '.join(have[:6])}{'…' if len(have) > 6 else ''})으로 "
                 f"만들 수 있는 기록이 후보 {ctx.get('recipe_stats', {}).get('후보', 0)}건 "
                 f"중에 없다"
+                # 장보기가 **계획에 없었던 것**과 **계획에는 있는데 메뉴에서
+                # 멈춰 못 간 것**은 다르다. 전에는 둘 다 "계획에서 빠졌다" 고 했다.
                 + ("" if "procure" in {r["skill"] for r in log}
+                   else " — 메뉴에서 멈춰 장보기 단계까지 가지 못했다"
+                   if "procure" in {t.skill for t in plan.steps}
                    else " — 제때 오는 조달도 없어 장보기 단계가 계획에서 빠졌다"))
         if ctx.get("record"):
             metrics["사용한 기록"] = ctx["record"].get("record_id")
