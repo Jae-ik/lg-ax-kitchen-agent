@@ -13,7 +13,7 @@ import json
 import pathlib
 
 import kitchen as K
-from planner import Task
+from planner import Task, plan as _make_plan
 from recipe_parse import contains_any, expand_avoid
 import store
 
@@ -274,6 +274,46 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
             "verified_by": "aftercare", "expect_metric": "세척 코스"})
 
     return beats
+
+
+# 기능 목록 — LLM 이 장면을 제안할 때 **이 안에서만** 고른다.
+# can: LLM 에게 보여 줄 설명. 실제로 그 스킬이 하는 일만 적는다.
+# metrics: 그 장면이 일어났는지 확인할 실행 지표. **LLM 이 아니라 여기서** 정한다.
+KITCHEN_CAPS = {
+    "inventory": ("냉장고 재고와 보관일을 읽어 먼저 써야 할 재료를 고른다",
+                  ["가장 급한 재료"]),
+    "menu": ("저장된 조리 기록과 공개 레시피 중 재고·못 먹는 재료·시간에 맞는 "
+             "메뉴를 고른다. 못 먹는 재료가 든 후보는 미리 뺀다", ["메뉴"]),
+    "procure": ("부족한 재료를 이전 구매 이력·금액 상한·못 먹는 재료 기준으로 "
+                "판단해 주문하거나, 판단이 안 되는 것만 고객에게 묻는다",
+                ["조달 대기", "확인 요청"]),
+    "prep": ("먹는 사람 수와 조리기 용량에 맞춰 넣을 양을 정하고 계량을 안내한다",
+             ["조리량"]),
+    "converge": ("화력을 스스로 조절하고 목표 상태에 닿으면 불을 끈다. 재료 투입·"
+                 "뚜껑·젓기처럼 손이 필요한 때만 알린다", ["가열 시간(분)"]),
+    "aftercare": ("조리 중에 잰 눌어붙음 정도로 식기세척기 코스를 정하고, "
+                  "소음을 싫어하는 시각에 걸리면 저소음으로 바꾼다", ["세척 코스"]),
+}
+
+
+def kitchen_capabilities(constraints: dict) -> list:
+    """**이번 상황의 계획에 실제로 들어가는** 기능만 돌려준다.
+
+    조달을 빼는 상황에서 "부족분을 주문한다" 장면을 허용하면 실행되지
+    않을 일을 약속하게 된다. 그래서 계획에서 거꾸로 뽑는다.
+
+    **flow_design 스킬을 그대로 돌린다.** 처음엔 플래너를 여기서 직접
+    불렀는데, flow_design 이 '조달 생략이면 재고가 갖춰진 것으로 본다'
+    를 따로 더하고 있어서 p1 에 실제 계획에 없는 procure 가 들어왔다.
+    같은 규칙을 두 곳에 적지 않는다.
+    """
+    from skills import REGISTRY
+    flow = REGISTRY.get("flow_design").run(
+        constraints=constraints, tasks=build_tasks(constraints),
+        planner=_make_plan, goal=domain_goal(constraints)).output["flow"]
+    steps = set(flow["steps"])
+    return [{"skill": k, "can": v[0], "metrics": v[1]}
+            for k, v in KITCHEN_CAPS.items() if k in steps]
 
 
 def domain_goal(constraints: dict) -> set:

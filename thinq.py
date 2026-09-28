@@ -482,7 +482,15 @@ def run(text: str, ask=None, seed: int = 7, approve=None) -> dict:
 
     buf = _io.StringIO()
     with contextlib.redirect_stdout(buf):
-        result = run_design.design_for(pid, Trace(), seed=seed)
+        # LLM 이 있으면 시나리오 장면도 제안받는다(llm_design). 제어는 그대로다.
+        factory = None
+        if ask is not None:
+            from llm_design import make_llm_beats
+            from kitchen_domain import kitchen_beats, kitchen_capabilities
+            factory = (lambda fo: make_llm_beats(ask, kitchen_capabilities,
+                                                 kitchen_beats, fo))
+        result = run_design.design_for(pid, Trace(), seed=seed,
+                                       beats_factory=factory)
     e = explain(result, ask=ask)
     return {"understood": u, "result": result, "explained": e,
             "trace": buf.getvalue(), "stopped": False, "confirm": ask_user}

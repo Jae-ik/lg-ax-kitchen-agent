@@ -41,6 +41,7 @@
    "covered": 4,
    "total_friction": 4
   },
+  "design_report": null,
   "flow": {
    "goal": [
     "cleaned",
@@ -404,6 +405,7 @@
    "covered": 2,
    "total_friction": 3
   },
+  "design_report": null,
   "flow": {
    "goal": [
     "cleaned",
@@ -799,6 +801,7 @@
    "covered": 1,
    "total_friction": 4
   },
+  "design_report": null,
   "flow": {
    "goal": [
     "cleaned",
@@ -1192,6 +1195,7 @@
    "covered": 3,
    "total_friction": 4
   },
+  "design_report": null,
   "flow": {
    "goal": [
     "cleaned",

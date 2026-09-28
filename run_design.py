@@ -57,8 +57,9 @@ def build_design_tasks(ctx_seed: dict) -> list:
              provides=("scenario",),
              bind=lambda c: {"persona": c["persona"], "friction": c["friction"],
                              "constraints": c["constraints"],
-                             # 어떤 장면을 그릴지는 도메인이 안다
-                             "beats_for": kitchen_beats},
+                             # 어떤 장면을 그릴지는 도메인이 안다.
+                             # LLM 으로 제안받을 때는 그 함수가 대신 들어온다.
+                             "beats_for": c.get("beats_for") or kitchen_beats},
              absorb=lambda c, o: c.update(scenario=o["scenario"]),
              note="수고가 사라진 하루를 먼저 그려야 설계 기준이 생긴다"),
         Task(skill="flow_design", requires=("scenario", "constraints"),
@@ -82,7 +83,9 @@ def build_design_tasks(ctx_seed: dict) -> list:
 
 
 def design_for(pid: str, trace: Trace, seed: int = 7,
-               keep_records: bool = False) -> dict:
+               keep_records: bool = False, beats_factory=None) -> dict:
+    """beats_factory: (friction_of) -> beats_for. LLM 장면 제안을 쓸 때 준다.
+    friction_of 는 situation_read 가 **이번에 읽은** 수고를 돌려준다."""
     p = personas.get(pid)
     banner(f"고객 상황 · {p['label']}  ({pid})")
 
@@ -104,6 +107,8 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
     seed = {"pantry_refill": refill}
     ctx = {"persona": p, "seed": seed,
            "executor": make_executor(REGISTRY, seed_ctx=seed)}
+    if beats_factory is not None:
+        ctx["beats_for"] = beats_factory(lambda _p, _c: ctx.get("friction", []))
     tasks = build_design_tasks(ctx)
     dp = make_plan({"verified"}, tasks)
 
@@ -137,7 +142,9 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
         print(f"   {b['at']}  사용자: {b['user']}")
         print(f"          가전: {b['system']}")
         print(f"          사라진 수고: {b['removes']}")
+    rep = getattr(ctx.get("beats_for"), "report", None)
     return {"persona": pid, "label": p["label"], "scenario": sc,
+            "design_report": dict(rep) if rep is not None else None,
             "flow": ctx["flow"], "verify": v,
             "chosen": v["metrics"].get("사용한 기록"),
             "target": v["metrics"].get("목표 질량비"),
