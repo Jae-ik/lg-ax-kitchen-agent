@@ -354,6 +354,72 @@ CLAIMS = (
 CONDITIONAL = r"(면|경우|때만|되는 것|필요하면|있으면|걸리면|넘기면|모자라면)"
 
 
+# ── 재계획: 무엇이 막았고, 그중 무엇을 풀 수 있는가 ──────────────────
+#
+# 설계 층이 되돌아갈 때 **무엇을 풀지는 도메인이 안다.** 여기서는 막힌
+# 결과를 보고 원인을 목록으로 낸다. 원인마다 풀 수 있는지(relaxable)와
+# 풀면 제약이 어떻게 바뀌는지(apply)를 함께 준다.
+#
+# 풀 수 있는 것 — **우리가 추정·선택으로 정한 것**
+#   · 조달 생략   추정(단계별 예상 분의 합)으로 뺐다. 실제로는 될 수 있다
+#   · 고른 메뉴   뒤 단계에서 막혔거나 예산을 넘겼다. 다른 메뉴가 있을 수 있다
+# 절대 풀지 않는 것 — **고객의 사실·안전**
+#   · 알레르기·기피, 나트륨 상한, 시간 예산, 기기가 못 하는 조리법
+#   이것들을 풀어 성립시키면 시나리오가 성립한 것이 아니라 고객을 바꾼 것이다.
+NEVER_RELAX = ("avoid", "max_sodium_mg", "time_budget_min", "device_method")
+
+
+def _cause(key, relaxable, why, apply=None):
+    return {"key": key, "relaxable": relaxable, "why": why, "apply": apply}
+
+
+def _exclude(rid):
+    return lambda c: dict(c, exclude_records=list(c.get("exclude_records") or [])
+                          + [rid])
+
+
+def diagnose(constraints: dict, verify: dict) -> list:
+    """막힌 원인을 풀 수 있는 것과 없는 것으로 나눠 돌려준다."""
+    m = verify.get("metrics", {})
+    halted = verify.get("halted_at")
+    rid, menu = m.get("사용한 기록"), m.get("메뉴")
+    out = []
+    if halted == "menu":
+        if constraints.get("skip_procurement"):
+            out.append(_cause(
+                "skip_procurement", True,
+                "추정으로 조달을 뺐는데 재고로 만들 메뉴가 없다 — 조달을 되살린다",
+                lambda c: dict(c, skip_procurement=False)))
+        out.append(_cause("no_menu", False,
+                          m.get("메뉴 없음") or m.get("중단") or "메뉴를 정하지 못했다"))
+        return out
+    if halted and rid:
+        out.append(_cause(f"exclude:{rid}", True,
+                          f"{menu}({rid})로는 {halted} 에서 막혔다 — 다른 메뉴로 다시 짠다",
+                          _exclude(rid)))
+        return out
+    if halted:
+        return [_cause(f"halt:{halted}", False, m.get("중단") or f"{halted} 에서 멈췄다")]
+    if verify.get("over_budget") and rid:
+        out.append(_cause(
+            f"exclude:{rid}", True,
+            f"{menu}({rid})는 {verify.get('spent_min')}분으로 예산 "
+            f"{verify.get('budget_min')}분을 넘는다 — 더 빨리 되는 메뉴를 찾는다",
+            _exclude(rid)))
+    return out
+
+
+def rank_attempt(verify: dict):
+    """시도들 가운데 무엇이 나은가. 성립 > 끝까지 감 > 예산 초과가 작음 > 개입이 적음."""
+    spent, budget = verify.get("spent_min"), verify.get("budget_min")
+    if spent is None:
+        over = float("inf")
+    else:
+        over = max(0.0, spent - budget) if budget else 0.0
+    return (bool(verify.get("verified")), verify.get("halted_at") is None,
+            -over, -verify.get("user_touches", 0))
+
+
 def kitchen_capabilities(constraints: dict) -> list:
     """**이번 상황의 계획에 실제로 들어가는** 기능만 돌려준다.
 
@@ -428,6 +494,9 @@ def build_tasks(constraints: dict) -> list:
         # 내 기록이 먼저, 공개 레시피가 그다음. 같은 형태로 맞춰 함께 채점한다.
         records = list(K.RECORDS.values())
         records += [recipe_to_record(r) for r in ctx.get("recipe_pool", [])]
+        # 재계획이 "이 메뉴로는 안 된다" 고 정한 기록은 뺀다(diagnose 참고)
+        out_ = set(constraints.get("exclude_records") or [])
+        records = [r for r in records if r["record_id"] not in out_]
         stock = [x for x in K.fridge_list_items()
                  if x["name"] not in set(ctx.get("expired", []))]
         return {"records": records,

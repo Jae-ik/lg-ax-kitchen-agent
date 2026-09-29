@@ -133,7 +133,7 @@ def main() -> int:
 
     ok_r, lines = check_replan()
     print()
-    print(f"  {'OK ' if ok_r else '!! '} 재계획은 필요할 때 한 번만 하고, 해도 안 되면 이유를 남긴다")
+    print(f"  {'OK ' if ok_r else '!! '} 재계획은 필요할 때만, 같은 원인은 한 번만 풀고, 고객의 사실은 풀지 않는다")
     for ln in lines:
         print(f"        {ln}")
     if not ok_r:
@@ -148,35 +148,55 @@ def main() -> int:
 def check_replan():
     """재계획의 성질을 본다.
 
-    상황 판단이 대략 추정으로 "조달을 뺀다" 고 정했는데 재고로 만들 게 없으면,
-    전에는 그대로 멈췄다. 이제 조달을 넣어 한 번 다시 계획한다.
+    막히면 도메인이 원인을 진단하고, 풀 수 있는 원인을 하나씩 풀어 다시 짠다.
       1 재고만으로 되는 가구(p1)는 재계획하지 않는다
-      2 x1(계란 하나) 은 재계획하고, 예산을 넘든 못 만들든 이유가 남는다
-      3 재계획은 한 번뿐이다 — 계획 단계에 REPLAN 이 두 번 찍히지 않는다
+      2 같은 원인은 두 번 풀지 않고, 최대 MAX_REPLANS 번이다
+      3 고른 안은 시도들 중 가장 낫다(예산 초과가 가장 작다)
+      4 알레르기·예산 같은 고객의 사실은 **풀지 않는다**
+      5 같은 입력이면 같은 재계획을 한다(결정적)
+      6 기록(REPLAN)과 결과의 재계획 횟수가 같다
     """
     import personas as P
+    from kitchen_domain import NEVER_RELAX
     lines, ok = [], True
-    rows = {}
-    for pid in ("p1_야근", "x1_빈냉장고"):
+
+    def run(pid, extra=None):
         if pid not in P.PERSONAS:
-            P.PERSONAS[pid] = {"id": pid, **UNSEEN[pid]}
+            P.PERSONAS[pid] = {"id": pid, **UNSEEN.get(pid, {}), **(extra or {})}
         tr = Trace()
         with contextlib.redirect_stdout(io.StringIO()):
             r = run_design.design_for(pid, tr, seed=7)
-        n_replan = sum(1 for row in tr.rows if row["stage"] == "REPLAN")
-        rows[pid] = (r, n_replan)
-    r1, n1 = rows["p1_야근"]
-    rx, nx = rows["x1_빈냉장고"]
-    mx = rx["verify"]["metrics"]
-    if r1["verify"].get("replanned") or n1:
+        return r, sum(1 for row in tr.rows if row["stage"] == "REPLAN")
+
+    r1, n1 = run("p1_야근")
+    if r1["verify"]["replans"] or n1:
         ok = False; lines.append("p1 이 재고로 되는데 재계획했다")
-    if not rx["verify"].get("replanned") or nx != 1:
-        ok = False; lines.append(f"x1 재계획 {rx['verify'].get('replanned')} · {nx}회")
-    reason = mx.get("시간 예산") or mx.get("메뉴 없음") or mx.get("중단")
-    if not rx["verify"]["verified"] and not reason:
-        ok = False; lines.append("x1 이 재계획 뒤에도 안 됐는데 이유가 없다")
-    lines.append(f"p1 재계획 {n1}회 · x1 재계획 {nx}회 → "
-                 f"{mx.get('메뉴') or '-'} · {str(reason or '성립')[:50]}")
+
+    rx, nx = run("x1_빈냉장고")
+    vx, hx = rx["verify"], rx["verify"]["replans"]
+    keys = [h["key"] for h in hx]
+    if not hx or len(keys) != len(set(keys)) or len(hx) > run_design.MAX_REPLANS:
+        ok = False; lines.append(f"x1 재계획 이력이 이상하다: {keys}")
+    if nx != len(hx):
+        ok = False; lines.append(f"기록 {nx}회 ≠ 결과 {len(hx)}회")
+    tried = [h["spent_min"] for h in hx if h["spent_min"] is not None]
+    if tried and vx.get("spent_min") is not None and vx["spent_min"] > min(tried):
+        ok = False; lines.append(f"더 나은 안({min(tried)}분)을 두고 {vx['spent_min']}분을 골랐다")
+    if not vx["verified"] and not vx["metrics"].get("고른 안"):
+        ok = False; lines.append("성립하지 못했는데 무엇을 골랐는지 안 남았다")
+    rx2, _ = run("x1_빈냉장고")
+    if [h["key"] for h in rx2["verify"]["replans"]] != keys:
+        ok = False; lines.append("같은 입력에서 재계획이 달라졌다")
+
+    allergic = ["대두", "갑각류", "유제품", "난류", "글루텐", "생선류", "견과류",
+                "조개류", "두족류"]
+    ra, _ = run("x6_전부알레르기", dict(UNSEEN["x1_빈냉장고"], avoid=allergic,
+                                   label="거의 모든 것에 알레르기"))
+    ha = [h["key"] for h in ra["verify"]["replans"]]
+    if any(k in NEVER_RELAX or k == "avoid" for k in ha):
+        ok = False; lines.append(f"고객의 사실을 풀었다: {ha}")
+    lines.append(f"p1 {n1}회 · x1 {keys} → {vx['metrics'].get('메뉴')} "
+                 f"{vx.get('spent_min')}/{vx.get('budget_min')}분 · 알레르기 가구 {ha}")
     return ok, lines
 
 

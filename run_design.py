@@ -36,6 +36,10 @@ STAGE_COSTS = {"보관 확인": 2, "메뉴 결정": 3,
                "조리": 12, "세척 시작": 2}
 
 
+# 재계획을 몇 번까지 하는가. 원인 하나를 풀 때마다 한 번이다.
+MAX_REPLANS = 3
+
+
 def pad(s: str, width: int) -> str:
     """한글은 두 칸을 차지한다. 표가 어긋나지 않게 실제 폭으로 맞춘다."""
     w = sum(2 if ord(ch) > 0x2000 else 1 for ch in s)
@@ -131,35 +135,68 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
             if len(res.evidence) > 14:
                 print(f"{'':12}… ({len(res.evidence) - 14}줄 생략)")
 
+    import copy
+    records0 = copy.deepcopy(K.RECORDS)
     run_steps(dp.steps)
     v = ctx["verify"]
 
     # ── 재계획 ──────────────────────────────────────────────────────────
-    # 상황 판단은 **대략 추정**(단계별 예상 분의 합)으로 "시간이 모자라니
-    # 조달을 뺀다" 고 정한다. 그런데 재고만으로 만들 수 있는 메뉴가 없으면
-    # 그 결정 때문에 **아무것도 못 한 채 멈췄다.** 전에는 거기서 끝났다 —
-    # 배송을 20분에서 27분(B마트 평균)으로만 바꿔도 맞벌이 가구가 이렇게
-    # 멈췄는데, 실제로 조달을 넣어 돌리면 예산 안에 들어왔다.
+    # 막히면 되돌아간다. **무엇이 막았는지는 도메인이 진단하고**(diagnose),
+    # 여기서는 그중 풀 수 있는 원인을 **하나씩** 풀어 다시 설계한다.
+    #   · 같은 원인은 두 번 풀지 않는다      · 최대 MAX_REPLANS 번
+    #   · 고객의 사실·안전(알레르기·예산·기기)은 도메인이 애초에 풀 수
+    #     없다고 표시한다 — 그것을 풀어 성립시키면 고객을 바꾼 것이다
+    # 사실(시간 예산·재고·불편)은 다시 읽지 않는다. 바뀌는 것은 **우리가
+    # 추정·선택으로 정한 결정**뿐이고, 순서는 플래너가 다시 계산한다.
+    # 예산을 넘는지는 추정이 아니라 실제 실행이 판정한다.
     #
-    # 그래서 한 번 되돌아간다: 사실(시간 예산·재고)은 그대로 두고 **조달
-    # 생략이라는 결정만** 뒤집어 시나리오부터 다시 짠다. 예산을 넘는지는
-    # 추정이 아니라 **실제 실행(experience_verify)이 판정**한다. 한 번만
-    # 한다 — 두 번째도 막히면 그 이유를 그대로 보고한다.
-    cons = ctx["constraints"]
-    if cons.get("skip_procurement") and v.get("halted_at") == "menu":
-        why = (f"재고만으로 가기로 했지만(추정 {cons.get('time_budget_min')}분 예산 초과) "
-               f"재고로 만들 수 있는 메뉴가 없어 조달을 넣어 다시 계획했다")
-        trace.stage("REPLAN", why)
+    # (고쳐 온 과정: 처음엔 "조달 생략 + 메뉴에서 멈춤" 한 경우만 한 번
+    #  되돌렸다. 지금은 뒤 단계에서 막힌 메뉴·예산을 넘긴 메뉴도 다룬다.)
+    from kitchen_domain import diagnose, rank_attempt
+
+    def rerun(constraints):
+        K.RECORDS.clear()
+        K.RECORDS.update(copy.deepcopy(records0))
         K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed_val,
-                keep_records=keep_records)
-        ctx["constraints"] = dict(cons, skip_procurement=False)
+                keep_records=True)
+        ctx["constraints"] = constraints
         ctx["executor"] = make_executor(REGISTRY, seed_ctx=seed)
         run_steps([t for t in dp.steps if t.skill != "situation_read"])
-        v = ctx["verify"]
-        v["metrics"]["재계획"] = why
-        v["replanned"] = True
+        return ctx["verify"]
+
+    attempts = [(dict(ctx["constraints"]), v)]
+    history, tried = [], set()
+    for _ in range(MAX_REPLANS):
+        cons = attempts[-1][0]
+        causes = diagnose(cons, attempts[-1][1])
+        fix = next((c for c in causes if c["relaxable"] and c["key"] not in tried),
+                   None)
+        if fix is None:
+            break
+        tried.add(fix["key"])
+        trace.stage("REPLAN", fix["why"])
+        new_cons = fix["apply"](cons)
+        v = rerun(new_cons)
+        history.append({"key": fix["key"], "why": fix["why"],
+                        "verified": v["verified"], "spent_min": v.get("spent_min")})
+        attempts.append((dict(new_cons), v))
+
+    # 시도들 가운데 가장 나은 안을 고른다. 마지막 시도가 아니면 그 안으로
+    # **한 번 더 돌려** 주방 상태(재고·저장 기록)를 그 안에 맞춘다(결정적이다).
+    best = max(range(len(attempts)),
+               key=lambda i: (rank_attempt(attempts[i][1]), -i))
+    if best != len(attempts) - 1:
+        v = rerun(attempts[best][0])
     else:
-        v["replanned"] = False
+        v = attempts[best][1]
+    v["replans"] = history
+    v["replanned"] = bool(history)
+    if history:
+        v["metrics"]["재계획"] = " → ".join(h["why"] for h in history)
+        if len(attempts) > 1:
+            v["metrics"]["고른 안"] = (f"시도 {len(attempts)}개 중 {best + 1}번째"
+                                   + (" (성립)" if v["verified"] else
+                                      " (성립한 안이 없어 가장 가까운 것)"))
     sc = ctx["scenario"]
     trace.stage("OUTPUT", f"{p['label']} — UX 시나리오 {len(sc['beats'])}장면, "
                           f"사용자 개입 {v['user_touches']}회 "

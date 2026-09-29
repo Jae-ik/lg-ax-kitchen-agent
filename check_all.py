@@ -138,6 +138,12 @@ def main() -> int:
     failed = []
     for script, what, _ in CHECKS:
         code, out, sec = _run(script)
+        # **아무것도 안 하고 끝난 검사는 통과가 아니다.** 패치로 파일 끝의
+        # `if __name__ == "__main__":` 이 지워져 check_generalize 가 아무것도
+        # 돌리지 않고 종료 코드 0 으로 끝났는데, 여기서 통과로 셌다.
+        if code == 0 and len([l for l in out.splitlines() if l.strip()]) < 3:
+            code = 1
+            out += "\n!! 출력 없이 끝났다 — 검사가 실행되지 않았을 수 있다"
         tail = next((l for l in reversed(out.strip().splitlines())
                      if l.strip()), "")
         mark = "OK" if code == 0 else "!!"

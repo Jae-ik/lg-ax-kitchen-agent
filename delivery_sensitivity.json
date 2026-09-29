@@ -110,11 +110,11 @@
     "menu": "된장찌개",
     "procure": true,
     "preorder": false,
-    "meal_min": 46.8,
+    "meal_min": 45.8,
     "budget_min": 45,
     "replanned": true,
     "verified": false,
-    "why_not": "46.8분 / 45분  ← 초과"
+    "why_not": "45.8분 / 45분  ← 초과"
    },
    {
     "persona": "p3_알레르기",
@@ -156,33 +156,33 @@
     "menu": "된장찌개",
     "procure": true,
     "preorder": false,
-    "meal_min": 61.8,
+    "meal_min": 60.8,
     "budget_min": 45,
     "replanned": true,
     "verified": false,
-    "why_not": "61.8분 / 45분  ← 초과"
+    "why_not": "60.8분 / 45분  ← 초과"
    },
    {
     "persona": "p3_알레르기",
-    "menu": "호박잎 삼계탕",
+    "menu": "된장찌개",
     "procure": true,
     "preorder": false,
-    "meal_min": 74.8,
+    "meal_min": 63.6,
     "budget_min": 60,
     "replanned": true,
     "verified": false,
-    "why_not": "74.8분 / 60분  ← 초과"
+    "why_not": "63.6분 / 60분  ← 초과"
    },
    {
     "persona": "p4_퇴근길",
     "menu": "-",
-    "procure": true,
+    "procure": false,
     "preorder": false,
     "meal_min": null,
     "budget_min": 25,
     "replanned": true,
     "verified": false,
-    "why_not": "지금 있는 것(배추, 된장, 고춧가루, 녹말가루, 마늘, 물…)으로 만들 수 있는 기록이 후보 100건 중에 없다 — 메뉴에서 멈춰 장보기 단계까지 가지 못했다"
+    "why_not": "지금 있는 것(배추, 된장, 고춧가루, 녹말가루, 마늘, 물…)으로 만들 수 있는 기록이 후보 100건 중에 없다 — 제때 오는 조달도 없어 장보기 단계가 계획에서 빠졌다"
    }
   ],
   "60": [
@@ -200,35 +200,35 @@
    {
     "persona": "p2_맞벌이",
     "menu": "-",
-    "procure": true,
+    "procure": false,
     "preorder": false,
     "meal_min": null,
     "budget_min": 45,
     "replanned": true,
     "verified": false,
-    "why_not": "지금 있는 것(배추, 된장, 애호박, 고춧가루, 녹말가루, 마늘…)으로 만들 수 있는 기록이 후보 100건 중에 없다 — 메뉴에서 멈춰 장보기 단계까지 가지 못했다"
+    "why_not": "지금 있는 것(배추, 된장, 애호박, 고춧가루, 녹말가루, 마늘…)으로 만들 수 있는 기록이 후보 100건 중에 없다 — 제때 오는 조달도 없어 장보기 단계가 계획에서 빠졌다"
    },
    {
     "persona": "p3_알레르기",
-    "menu": "호박잎 삼계탕",
+    "menu": "된장찌개",
     "procure": true,
     "preorder": false,
-    "meal_min": 89.8,
+    "meal_min": 78.7,
     "budget_min": 60,
     "replanned": true,
     "verified": false,
-    "why_not": "89.8분 / 60분  ← 초과"
+    "why_not": "78.7분 / 60분  ← 초과"
    },
    {
     "persona": "p4_퇴근길",
     "menu": "-",
-    "procure": true,
+    "procure": false,
     "preorder": false,
     "meal_min": null,
     "budget_min": 25,
     "replanned": true,
     "verified": false,
-    "why_not": "지금 있는 것(배추, 된장, 고춧가루, 녹말가루, 마늘, 물…)으로 만들 수 있는 기록이 후보 100건 중에 없다 — 메뉴에서 멈춰 장보기 단계까지 가지 못했다"
+    "why_not": "지금 있는 것(배추, 된장, 고춧가루, 녹말가루, 마늘, 물…)으로 만들 수 있는 기록이 후보 100건 중에 없다 — 제때 오는 조달도 없어 장보기 단계가 계획에서 빠졌다"
    }
   ]
  }
