@@ -191,6 +191,10 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
         v = attempts[best][1]
     v["replans"] = history
     v["replanned"] = bool(history)
+    # 실행 뒤에야 아는 것: 실제 조리·세척 시각, 에이전트가 스스로 한 판단
+    from kitchen_domain import outcome_notes, retime_beats
+    ctx["scenario"]["retimed"] = retime_beats(ctx["scenario"], v, ctx["constraints"])
+    ctx["scenario"]["outcomes"] = outcome_notes(v)
     if history:
         v["metrics"]["재계획"] = " → ".join(h["why"] for h in history)
         if len(attempts) > 1:
@@ -205,10 +209,13 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
 
     print()
     print("  ── 시나리오 ──")
-    for b in sc["beats"]:
+    for b in sorted(sc["beats"], key=lambda b: b["at"]):
         print(f"   {b['at']}  사용자: {b['user']}")
         print(f"          가전: {b['system']}")
         print(f"          사라진 수고: {b['removes']}")
+    for o in sc.get("outcomes", []):
+        print(f"   (실행 중) 사용자: {o['user']}")
+        print(f"          가전: {o['system']}")
     rep = getattr(ctx.get("beats_for"), "report", None)
     return {"persona": pid, "label": p["label"], "scenario": sc,
             "design_report": dict(rep) if rep is not None else None,

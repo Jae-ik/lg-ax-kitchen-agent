@@ -113,6 +113,7 @@ class SituationReadSkill(Skill):
         # 세척을 언제 시작하는지는 실행 층이 알아야 소음 판단을 할 수 있다.
         # 시나리오 문장에만 적어 두면 문장과 동작이 어긋난다.
         home = persona.get("arrive_home")
+        constraints["arrive_home"] = home
         if home:
             h, m = map(int, home.split(":"))
             t = h * 60 + m + 45          # 일을 마친 뒤 마무리 기기를 돌린다

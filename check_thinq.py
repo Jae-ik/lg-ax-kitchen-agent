@@ -350,10 +350,12 @@ def d6():
 
 @check("선제 주문이 아니면 귀가 전 장면을 귀가 시각으로 옮긴다")
 def d7():
-    sc = _scenes((-50, "장을 안 본다", "부족분을 판단해 주문한다", "procure", [0]))
-    r = _design("p3_알레르기", sc)
+    # p1 은 퇴근 시각을 모른다(야근). p3 로 재다가 p3 에 퇴근 정보가 생겨
+    # 선제 주문 가구가 되자 이 시험이 성립하지 않았다.
+    sc = _scenes((-50, "고민하지 않는다", "메뉴를 골라 둔다", "menu", [0]))
+    r = _design("p1_야근", sc)
     b = [x for x in r["scenario"]["beats"] if x.get("source") == "LLM"][0]
-    ok = b["at"] == "18:30" and r["design_report"]["adjusted"]
+    ok = b["at"] == "21:40" and r["design_report"]["adjusted"]
     return ok, f"장면 시각 {b['at']} · {r['design_report']['adjusted'][:1]}"
 
 

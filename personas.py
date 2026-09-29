@@ -40,6 +40,11 @@ PERSONAS = {
         "label": "맞벌이 2인 가구",
         "household_size": 2,
         "arrive_home": "19:20",
+        # 퇴근 이동 37분 — 통계청 「2024년 통근 근로자 이동 특성 분석」 출퇴근
+        # 왕복 평균 73.9분의 절반(편도만 따로는 확인하지 못했다). 퇴근 시각을
+        # 알면 메뉴·승인·주문을 **현관에 들어서기 전에** 끝낼 수 있다.
+        "leave_office": "18:43",
+        "commute_min": 37,
         "time_budget_min": 45,
         "next_morning_rush": True,
         "avoid": [],
@@ -62,6 +67,11 @@ PERSONAS = {
         "label": "알레르기 가족이 있는 4인 가구",
         "household_size": 4,
         "arrive_home": "18:30",
+        # 퇴근 이동 37분 — 통계청 「2024년 통근 근로자 이동 특성 분석」 출퇴근
+        # 왕복 평균 73.9분의 절반(편도만 따로는 확인하지 못했다). 퇴근 시각을
+        # 알면 메뉴·승인·주문을 **현관에 들어서기 전에** 끝낼 수 있다.
+        "leave_office": "17:53",
+        "commute_min": 37,
         "time_budget_min": 60,
         "next_morning_rush": False,
         "avoid": ["표고버섯", "새우"],   # 가구원 알레르기

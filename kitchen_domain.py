@@ -312,86 +312,163 @@ KITCHEN_TERMS = {"amount": "조리량", "finish": "세척",
 def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
     """주방 도메인의 장면 목록.
 
-    `scenario_draft` 가 이 함수를 주입받는다. 설계 층 스킬은 "현관에
-    들어선다", "화력은 스스로 맞춘다" 같은 문장도, 그 장면을 검증할
-    스킬 이름(verified_by)도 모른다 — 전부 여기에 있다.
+    `scenario_draft` 가 이 함수를 주입받는다. 설계 층 스킬은 장면 문장도,
+    그 장면을 검증할 스킬 이름(verified_by)도 모른다 — 전부 여기에 있다.
 
-    세탁실 도메인 파일을 쓰면 laundry_beats 를 만들어 주입하면 되고,
-    설계 층은 한 줄도 바뀌지 않는다.
+    **퇴근 시각을 알면 현관에 들어서기 전에 끝낸다.** 전에는 첫 장면이
+    늘 "현관에 들어선다 → 재고를 읽는다" 였다. 그러면 그때 가서 메뉴를
+    정하고 주문하므로 배송을 집에서 기다린다. 퇴근길에 메시지로 메뉴를
+    알리고, 처음 사는 것처럼 판단이 안 되는 것만 물어 승인받고, 주문한
+    것이 이동 중에 도착하면 현관에 들어설 때 이미 재료가 있다(씽큐 클로의
+    "제안 → 사람 승인 → 실행" 이 이 자리다). 퇴근 시각을 모르면 전처럼
+    귀가 뒤에 한다.
+
+    장면 시각은 **설계 시점의 추정**이다. 조리·세척 장면은 실행 뒤에
+    retime_beats 가 실제 시각으로 다시 맞춘다.
 
     plus: (시각, 분) -> 시각   시각 계산은 스킬이 준다
     """
     t0 = persona.get("arrive_home", "19:00")
+    pre = bool(constraints.get("preorder"))
+    lv = persona.get("leave_office", t0) if pre else t0
     beats = []
 
     # verified_by: 이 장면이 실제로 일어났는지 확인할 실행 스킬.
-    # 검증 단계가 이 이름으로 실행 로그를 조회한다 — 그림과 실행을 잇는 고리다.
-    beats.append({
-        "at": t0, "user": "현관에 들어선다",
-        "system": "재고와 남은 시간을 이미 읽고 오늘 할 수 있는 것을 정해 둔다",
-        "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일",
-        "verified_by": "inventory", "expect_metric": "메뉴"})
+    if pre:
+        beats.append({
+            "at": lv, "user": "퇴근길에 메시지를 받는다",
+            "system": "냉장고 재고·남은 시간·먹을 사람을 읽고 오늘 메뉴를 정해 알린다",
+            # 메뉴를 집 밖에서 정하므로, 집에 와서 시간에 쫓기며 정할 일이 없다
+            "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일 / "
+                       + KITCHEN_TERMS["short_time"],
+            "verified_by": "inventory", "expect_metric": "메뉴"})
+    else:
+        beats.append({
+            "at": t0, "user": "현관에 들어선다",
+            "system": "재고와 남은 시간을 읽고 오늘 할 수 있는 것을 정한다",
+            "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일",
+            "verified_by": "inventory", "expect_metric": "메뉴"})
 
     if constraints.get("avoid"):
         beats.append({
-            "at": plus(t0, 1), "user": "아무것도 확인하지 않는다",
+            "at": plus(lv, 1),
+            "user": "메시지로 확인만 한다" if pre else "아무것도 확인하지 않는다",
             "system": f"못 먹는 재료({', '.join(constraints['avoid'])})가 들어가는 "
                       f"후보를 미리 제외한다",
             "removes": "재료마다 못 먹는 것이 섞였는지 확인하는 일",
             "verified_by": "menu", "expect_metric": "메뉴"})
 
-    if constraints.get("preorder"):
-        lv = persona.get("leave_office", t0)
+    if pre:
         beats.append({
-            "at": lv, "user": "사무실을 나선다",
-            "system": "냉장고와 양념 선반을 함께 확인해 부족한 것을 "
-                      "귀가 시각에 맞춰 주문한다",
-            "removes": "퇴근길에 장을 보러 들르는 일 / 집에 와서 뭐가 없는지 "
-                       "그제야 아는 일 / 양념이 떨어진 걸 조리 중에 발견하는 일",
+            "at": plus(lv, 2), "user": "메시지로 승인만 한다",
+            # 설계 시점에는 자동 주문이 될지 확인이 필요할지 모른다 —
+            # 판단 기준을 말하고 결과는 열어 둔다.
+            "system": "냉장고와 양념 선반을 함께 보고 부족한 것 중 되는 것은 주문하고, "
+                      "처음 사는 것처럼 판단이 안 되는 것만 물어 승인받는다. "
+                      "못 먹는 재료가 든 상품은 사지 않는다. 귀가 시각에 맞춰 도착한다",
+            "removes": "퇴근길에 장을 보러 들르는 일 / 누가 장을 볼지 매번 정하는 일 / "
+                       "장을 볼 때 성분을 읽는 일 / 양념이 떨어진 걸 조리 중에 발견하는 일",
             "verified_by": "procure",
             "expect_any": ["조달 대기", "확인 요청"]})
-
-    if constraints.get("skip_procurement"):
+        beats.append({
+            "at": t0, "user": "현관에 들어서면 재료가 이미 와 있다",
+            "system": "먹을 사람 수에 맞춰 넣을 양을 정하고 계량을 안내한다",
+            "removes": "집에 와서 뭐가 없는지 그제야 아는 일",
+            "verified_by": "prep", "expect_metric": "조리량"})
+    elif constraints.get("skip_procurement"):
         beats.append({
             "at": plus(t0, 2), "user": "장을 보지 않는다",
             "system": "시간이 모자라므로 지금 있는 재료만으로 가능한 것을 고른다",
             "removes": "시간이 모자란 상태에서 메뉴를 정하는 일",
-            # 조달을 생략했다는 것은 '자동 주문' 이 결과에 없다는 뜻이다.
             "verified_by": "menu", "expect_metric": "메뉴"})
-    elif not constraints.get("preorder"):
-        # 선제 주문이면 퇴근길 장면이 이미 조달을 덮는다 — 중복해서 넣지 않는다
+    else:
         beats.append({
             "at": plus(t0, 2), "user": "주문을 누르지 않는다",
-            # 설계 시점에는 **자동 주문이 될지 확인이 필요할지 모른다.**
-            # "스스로 주문한다" 고만 적었다가, 둘 다 확인 요청이 된 상황에서
-            # 장면이 실제와 어긋났다. 판단 기준을 말하고 결과는 열어 둔다.
             "system": "부족분을 이력·상한·안전 기준으로 판단해 "
                       "되는 것은 주문하고, 안 되는 것만 묻는다",
-            "removes": "누가 장을 볼지 매번 정하는 일",
+            "removes": "누가 장을 볼지 매번 정하는 일 / 장을 볼 때 성분을 읽는 일",
             "verified_by": "procure",
             "expect_any": ["조달 대기", "확인 요청"]})
 
     beats.append({
-        # "불 앞을 지키지 않는다" 는 과장이었다. 재료를 넣고 뚜껑을
-        # 여닫고 젓는 것은 여전히 사람이 한다(제안서 표1). 달라지는 것은
-        # **언제 해야 하는지 몰라 계속 지켜보던 일**이 없어진다는 점이다.
+        # 재료를 넣고 뚜껑을 여닫고 젓는 것은 여전히 사람이 한다(제안서 표1).
+        # 달라지는 것은 언제 해야 하는지 몰라 계속 지켜보던 일이 없어진다는 점이다.
         "at": plus(t0, 5), "user": "부를 때만 손을 댄다",
         "system": ("화력은 스스로 맞추고 목표 상태에 닿으면 멈춘다. "
                    "손이 필요한 때(재료 투입·뚜껑·젓기)만 알려 준다"),
         "removes": "조리 중 냄비 앞을 떠나지 못하는 일",
-        "verified_by": "converge", "expect_metric": "가열 시간(분)"})
+        "verified_by": "converge", "expect_metric": "가열 시간(분)", "timed": "cook"})
 
     if constraints.get("finish_cleanup"):
         quiet = constraints.get("quiet_after")
         beats.append({
-            "at": plus(t0, 45), "user": "코스를 고르지 않는다",
+            "at": plus(t0, 45), "user": "다 먹고 나서 코스를 고르지 않는다",
             "system": "조리기가 잰 눌어붙음 정도로 코스를 정하고"
                       + (f", {quiet} 이후까지 돌면 저소음으로 바꾼다"
                          if quiet else " 바로 시작한다"),
             "removes": "먹고 나서 설거지를 미루는 일 / 세척기를 언제 돌릴지 정하는 일",
-            "verified_by": "aftercare", "expect_metric": "세척 코스"})
+            "verified_by": "aftercare", "expect_metric": "세척 코스", "timed": "wash"})
 
     return beats
+
+
+# 식사에 드는 시간(분). 세척은 **다 먹은 뒤**에 시작한다. 전에는 귀가 +45분
+# 고정이라, 식사까지 48분 걸린 가구에서 **밥이 되기도 전에** 세척기가 돌았다.
+# 20분은 가정이다(실측·통계를 확인하지 못했다).
+EAT_MIN = 20
+
+
+def _hhmm_plus(hhmm: str, minutes: float) -> str:
+    h, m = map(int, hhmm.split(":"))
+    t = int(round(h * 60 + m + minutes))
+    return f"{(t // 60) % 24:02d}:{t % 60:02d}"
+
+
+def retime_beats(scenario: dict, verify: dict, constraints: dict) -> list:
+    """조리·세척 장면을 **실제 실행 시각**으로 다시 맞춘다. 바꾼 것을 돌려준다.
+
+    설계 시점에는 배송을 기다릴지·몇 분 끓일지 모른다. 실행 뒤에는 안다.
+    """
+    t0 = constraints.get("arrive_home")
+    m = verify.get("metrics", {})
+    if not t0 or m.get("식사까지(분)") is None:
+        return []
+    spent = m["식사까지(분)"]
+    cook_start = spent - (m.get("가열 시간(분)") or 0)
+    real = {"cook": _hhmm_plus(t0, cook_start),
+            "wash": _hhmm_plus(t0, spent + EAT_MIN)}
+    changed = []
+    for b in scenario.get("beats", []):
+        k = b.get("timed")
+        if k in real and b["at"] != real[k]:
+            changed.append(f"{b['verified_by']}: {b['at']} → {real[k]}")
+            b["at_planned"], b["at"] = b["at"], real[k]
+    for c in verify.get("beat_check", []):
+        for b in scenario.get("beats", []):
+            if b.get("at_planned") == c["at"] and b["removes"] == c["removes"]:
+                c["at"] = b["at"]
+    return changed
+
+
+def outcome_notes(verify: dict) -> list:
+    """실행 중에 **에이전트가 스스로 한 판단**을 장면으로 남긴다.
+
+    재계획·버림 알림은 시나리오를 그릴 때는 모르고 실행해 봐야 안다.
+    결과 지표에만 있으면 시나리오를 읽는 사람은 그 일이 있었는지 모른다.
+    """
+    m = verify.get("metrics", {})
+    out = []
+    if m.get("재계획"):
+        out.append({"user": "다시 고르지 않는다",
+                    "system": f"다시 계획했다 — {m['재계획']}"
+                              + (f" ({m['고른 안']})" if m.get("고른 안") else "")})
+    if m.get("오늘 못 쓰는 임박 재료"):
+        out.append({"user": "버릴 재료를 뒤늦게 발견하지 않는다",
+                    "system": f"알린다 — {m['오늘 못 쓰는 임박 재료']}"})
+    if m.get("확인 요청"):
+        out.append({"user": "물어본 것에만 답한다",
+                    "system": "승인받은 뒤 주문했다 — " + "; ".join(m["확인 요청"])})
+    return out
 
 
 # 기능 목록 — LLM 이 장면을 제안할 때 **이 안에서만** 고른다.
@@ -570,6 +647,7 @@ def build_tasks(constraints: dict) -> list:
         return {"items": K.fridge_list_items(), "urgency_ratio": 0.6}
 
     def _inventory_absorb(ctx, out):
+        ctx["decided_before_home"] = bool(constraints.get("preorder"))
         ctx["urgent"] = [i["name"] for i in out["urgent"]]
         ctx["must_use"] = [i["name"] for i in out["urgent"]
                            if i["days_left"] <= MUST_USE_DAYS]
@@ -728,7 +806,10 @@ def build_tasks(constraints: dict) -> list:
                     ctx.get("wait_for_delivery_min", 0), a_eta)
         ctx["approved_after_ask"] = approved
         ctx["late_after_ask"] = late
-        if approved and not pre and not out["auto_ordered"]:
+        if approved and pre and not out["auto_ordered"]:
+            ctx["delivery_note"] = (f"퇴근길에 확인받아 주문 — 이동 "
+                                    f"{constraints.get('commute_min')}분 안에 도착, 기다림 없음")
+        elif approved and not pre and not out["auto_ordered"]:
             ctx["delivery_note"] = (f"확인 후 주문한 것을 {ctx['wait_for_delivery_min']}분 "
                                     f"기다린 뒤 조리를 시작한다")
         elif approved and not pre:
@@ -1036,10 +1117,24 @@ def build_tasks(constraints: dict) -> list:
         ctx["saved_satisfaction"] = sat
         ctx["target_was_estimated"] = bool(ctx["record"].get("estimated"))
 
+    def _meal_ready_min(ctx):
+        """귀가부터 음식이 될 때까지(분). 식사까지 지표와 같은 식이다."""
+        if ctx.get("cook_min") is None:
+            return None
+        return (ctx.get("wait_for_delivery_min", 0)
+                + (0 if ctx.get("decided_before_home") else
+                   FIXED_MIN["보관 확인"] + FIXED_MIN["메뉴 결정"])
+                + FIXED_MIN["준비"] + ctx["cook_min"])
+
     def _aftercare_bind(ctx):
         return {"soil_score": ctx["soil"], "profile": "dishwasher",
                 "soil_sigma": ctx.get("soil_sigma", 0.0),
-                "start_at": constraints.get("cleanup_at"),
+                # 다 먹은 뒤에 시작한다(귀가 + 식사까지 + 식사 시간)
+                "start_at": (_hhmm_plus(constraints["arrive_home"],
+                                        _meal_ready_min(ctx) + EAT_MIN)
+                             if constraints.get("arrive_home")
+                             and _meal_ready_min(ctx) is not None
+                             else constraints.get("cleanup_at")),
                 "quiet_after": constraints.get("quiet_after")}
 
     def _aftercare_absorb(ctx, out):
@@ -1133,8 +1228,12 @@ def make_executor(registry, on_step=None, seed_ctx=None):
         # 제대로 된 한 끼" 인데, 지금까지 **그것을 검증하는 곳이 없었다.**
         # 장면 달성과 개입 횟수만 보고 있었다.
         if ctx.get("cook_min") is not None:
+            # 선제 주문이면 재고 확인·메뉴 결정은 **퇴근길에 끝났다** — 집에서
+            # 쓰는 시간에 넣지 않는다. 전에는 그것까지 집에서 한 것으로 셌다.
+            before_home = ctx.get("decided_before_home")
             spent = (ctx.get("wait_for_delivery_min", 0)
-                     + FIXED_MIN["보관 확인"] + FIXED_MIN["메뉴 결정"]
+                     + (0 if before_home else
+                        FIXED_MIN["보관 확인"] + FIXED_MIN["메뉴 결정"])
                      + FIXED_MIN["준비"] + ctx["cook_min"])
             ctx["spent_min"] = round(spent, 1)
             metrics["식사까지(분)"] = ctx["spent_min"]

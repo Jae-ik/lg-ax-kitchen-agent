@@ -393,7 +393,9 @@ def c_late():
     bought = m.get("확인 후 승인") or []
     etas = [store.min_delivery_min(item=n) for n in bought]
     two = (all(e is not None and e <= 60 for e in etas)
-           and (not bought or "기다린" in str(m.get("조달 대기"))))
+           # 집에서 기다렸거나, 퇴근길에 주문해 이동 중에 받았거나
+           and (not bought or "기다린" in str(m.get("조달 대기"))
+                or "이동" in str(m.get("조달 대기"))))
     three = (store.min_delivery_min(item="없는재료") is None
              and store.min_delivery_min(item="화이트와인") is None)
     return one and two and three, (
@@ -550,6 +552,35 @@ def c_meat_names():
                     if (KD.absorb_capacity([{"name": n, "qty_g": 100}]) > 0) != want]
     ok = not zero and not wrong_absorb
     return ok, f"익힘 0 인 고기 {zero} · 흡수 판정이 틀린 것 {wrong_absorb}"
+
+
+@check("세척은 음식이 된 뒤에, 선제 주문은 현관에 들어서기 전에")
+def c_timeline():
+    """장면 시각이 설계 시점의 고정값(귀가 +45분)이라, 식사까지 48분 걸린
+    가구에서 **밥이 되기도 전에** 세척기를 돌리는 시나리오였다. 실행 뒤
+    실제 시각으로 맞추고, 세척 실행도 다 먹은 뒤를 기준으로 소음을 본다."""
+    import json
+    rows = json.load(io.open("scenarios.json", encoding="utf-8"))
+    bad = []
+
+    def mins(hhmm):
+        h, m = map(int, hhmm.split(":"))
+        return h * 60 + m
+    for r in rows:
+        import personas
+        p = personas.get(r["persona"])
+        t0 = mins(p["arrive_home"])
+        spent = r["verify"]["metrics"].get("식사까지(분)")
+        for b in r["scenario"]["beats"]:
+            at = mins(b["at"])
+            at = at + 1440 if at < t0 - 600 else at
+            if b["verified_by"] == "aftercare" and spent is not None and at < t0 + spent:
+                bad.append(f"{r['persona']} 세척 {b['at']} 이 음식보다 먼저")
+            if (p.get("commute_min") and b["verified_by"] == "procure"
+                    and at >= t0):
+                bad.append(f"{r['persona']} 주문 {b['at']} 이 귀가 뒤")
+    return not bad, (" / ".join(bad) if bad else
+                     f"{len(rows)}가구 모두 세척은 식사 뒤, 퇴근 정보가 있는 가구는 주문이 귀가 전")
 
 
 @check("같은 재료가 두 번 나오면 합친다")
