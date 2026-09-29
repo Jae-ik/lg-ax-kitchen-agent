@@ -21,7 +21,7 @@ import run_design
 import store
 from orchestrator import Trace
 
-MINUTES = (20, 27, 45, 60)
+MINUTES = (20, 27, 30, 45, 60)
 
 
 def measure(minutes: int) -> list:

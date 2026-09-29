@@ -93,6 +93,52 @@
     "why_not": null
    }
   ],
+  "30": [
+   {
+    "persona": "p1_야근",
+    "menu": "된장찌개",
+    "procure": false,
+    "preorder": false,
+    "meal_min": 14.5,
+    "budget_min": 25,
+    "replanned": false,
+    "verified": true,
+    "why_not": null
+   },
+   {
+    "persona": "p2_맞벌이",
+    "menu": "된장찌개",
+    "procure": true,
+    "preorder": false,
+    "meal_min": 46.8,
+    "budget_min": 45,
+    "replanned": true,
+    "verified": false,
+    "why_not": "46.8분 / 45분  ← 초과"
+   },
+   {
+    "persona": "p3_알레르기",
+    "menu": "호박잎 삼계탕",
+    "procure": true,
+    "preorder": false,
+    "meal_min": 59.9,
+    "budget_min": 60,
+    "replanned": false,
+    "verified": true,
+    "why_not": null
+   },
+   {
+    "persona": "p4_퇴근길",
+    "menu": "된장찌개",
+    "procure": true,
+    "preorder": true,
+    "meal_min": 14.5,
+    "budget_min": 25,
+    "replanned": false,
+    "verified": true,
+    "why_not": null
+   }
+  ],
   "45": [
    {
     "persona": "p1_야근",
