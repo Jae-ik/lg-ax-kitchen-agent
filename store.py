@@ -146,14 +146,19 @@ _NOT_QUICK = set("""당귀 함초 함초가루 치자가루 노루궁뎅이버�
     뽕잎국수 치자국수 백년초국수 날콩가루""".split())
 _QUICK = {k: v for k, v in BASE_PRICE.items() if k not in _NOT_QUICK}
 
-# 즉시배송 20분은 이전 STAGE_COSTS 의 "조달 20분" 을 상점 조건으로 옮긴 값이다.
-# 값을 바꾼 것이 아니라 **출처를 바꾼 것** — 내가 정한 상수에서 상점이 알려주는
-# 조건으로 옮겼다. 상점을 바꾸면 상황 판단도 따라 바뀐다.
+# (고쳐 온 과정: 내가 정한 "조달 20분" 상수 → 상점 조건으로 옮김 → B마트 평균 27분)
+# 상황 판단(STAGE_COSTS 의 '조달')은 이 상점 값을 읽으므로 함께 바뀐다.
 # can_order 는 **제휴 여부**다. 공개 주문 API 가 없으므로 실제로는 전부
 # False 여야 하지만, 그러면 자동 주문 경로를 시연할 수 없다. 하나만
 # "제휴를 가정한 상점" 으로 두고 그 사실을 결과에 남긴다.
+# 즉시배송 시간: **27분** — 배민 B마트 평균 배송 시간(CEO스코어데일리
+# 2025-04 보도 "평균 27분"). 전에는 20분이었는데 근거가 없는 값이었다.
+# B마트가 내건 "1시간 내" 는 상한이지 평균이 아니다. 이 값에 따라 상황별
+# 결과가 어떻게 바뀌는지는 delivery_sensitivity.py 가 잰다.
+QUICK_DELIVERY_MIN = 27
+
 STORES = [
-    Store("즉시배송", delivery_min=20, price_factor=1.10, catalog=_QUICK,
+    Store("즉시배송", delivery_min=QUICK_DELIVERY_MIN, price_factor=1.10, catalog=_QUICK,
           can_order=True, source="시뮬레이터(제휴 가정)"),
     Store("새벽배송", delivery_min=720, price_factor=1.00, catalog=BASE_PRICE,
           out_of_stock=("미나리",)),

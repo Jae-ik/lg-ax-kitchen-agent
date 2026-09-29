@@ -434,6 +434,9 @@ def rule_explain(result: dict) -> str:
         return f"이번에는 만들 수 있는 것이 없었습니다. {why}"
 
     bits = [f"{m['메뉴']}로 정했습니다"]
+    # 다시 계획했다는 사실을 숨기지 않는다 — 사용자는 "왜 장을 봤지?" 를 묻는다
+    if m.get("재계획"):
+        bits.append("재고만으로는 만들 수 있는 것이 없어 장보기를 넣어 다시 계획했습니다")
     if m.get("가열 시간(분)"):
         bits.append(f"가열은 {m['가열 시간(분)']}분")
     if m.get("손이 가는 일"):

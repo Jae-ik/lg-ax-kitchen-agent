@@ -93,7 +93,8 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
     # 상비품(소금·후춧가루 등)은 가구와 무관하게 늘 있다고 본다.
     # seed 를 바꿔 같은 상황을 여러 번 돌리면 흔들림의 크기를 잴 수 있다.
     low = p.get("pantry_low")
-    K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed,
+    seed_val = seed        # 아래에서 seed 이름을 초기값 dict 로 다시 쓴다
+    K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed_val,
             keep_records=keep_records)
 
     trace.stage("GOAL", f"{p['label']}의 수고를 줄이는 UX 시나리오를 만들고 "
@@ -116,20 +117,49 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
                 {"순서": [t.skill for t in dp.steps]})
     trace.detail(dp.reasoning)
 
-    for i, t in enumerate(dp.steps, 1):
-        skill = REGISTRY.get(t.skill)
-        trace.stage("SKILL", f"[{i}/{len(dp.steps)}] {skill.name} — {t.note}")
-        res = skill.run(**t.kwargs(ctx))
-        t.absorb(ctx, res.output)
-        shown = {k: v for k, v in res.output.items()
-                 if k not in ("plan", "execution", "scenario")}
-        trace.stage("EXECUTE", f"{skill.name} 실행", shown or None)
-        trace.stage("EVALUATE", "근거")
-        trace.detail(res.evidence[:14])
-        if len(res.evidence) > 14:
-            print(f"{'':12}… ({len(res.evidence) - 14}줄 생략)")
+    def run_steps(steps):
+        for i, t in enumerate(steps, 1):
+            skill = REGISTRY.get(t.skill)
+            trace.stage("SKILL", f"[{i}/{len(steps)}] {skill.name} — {t.note}")
+            res = skill.run(**t.kwargs(ctx))
+            t.absorb(ctx, res.output)
+            shown = {k: v for k, v in res.output.items()
+                     if k not in ("plan", "execution", "scenario")}
+            trace.stage("EXECUTE", f"{skill.name} 실행", shown or None)
+            trace.stage("EVALUATE", "근거")
+            trace.detail(res.evidence[:14])
+            if len(res.evidence) > 14:
+                print(f"{'':12}… ({len(res.evidence) - 14}줄 생략)")
 
+    run_steps(dp.steps)
     v = ctx["verify"]
+
+    # ── 재계획 ──────────────────────────────────────────────────────────
+    # 상황 판단은 **대략 추정**(단계별 예상 분의 합)으로 "시간이 모자라니
+    # 조달을 뺀다" 고 정한다. 그런데 재고만으로 만들 수 있는 메뉴가 없으면
+    # 그 결정 때문에 **아무것도 못 한 채 멈췄다.** 전에는 거기서 끝났다 —
+    # 배송을 20분에서 27분(B마트 평균)으로만 바꿔도 맞벌이 가구가 이렇게
+    # 멈췄는데, 실제로 조달을 넣어 돌리면 예산 안에 들어왔다.
+    #
+    # 그래서 한 번 되돌아간다: 사실(시간 예산·재고)은 그대로 두고 **조달
+    # 생략이라는 결정만** 뒤집어 시나리오부터 다시 짠다. 예산을 넘는지는
+    # 추정이 아니라 **실제 실행(experience_verify)이 판정**한다. 한 번만
+    # 한다 — 두 번째도 막히면 그 이유를 그대로 보고한다.
+    cons = ctx["constraints"]
+    if cons.get("skip_procurement") and v.get("halted_at") == "menu":
+        why = (f"재고만으로 가기로 했지만(추정 {cons.get('time_budget_min')}분 예산 초과) "
+               f"재고로 만들 수 있는 메뉴가 없어 조달을 넣어 다시 계획했다")
+        trace.stage("REPLAN", why)
+        K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed_val,
+                keep_records=keep_records)
+        ctx["constraints"] = dict(cons, skip_procurement=False)
+        ctx["executor"] = make_executor(REGISTRY, seed_ctx=seed)
+        run_steps([t for t in dp.steps if t.skill != "situation_read"])
+        v = ctx["verify"]
+        v["metrics"]["재계획"] = why
+        v["replanned"] = True
+    else:
+        v["replanned"] = False
     sc = ctx["scenario"]
     trace.stage("OUTPUT", f"{p['label']} — UX 시나리오 {len(sc['beats'])}장면, "
                           f"사용자 개입 {v['user_touches']}회 "

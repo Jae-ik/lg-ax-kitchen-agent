@@ -131,9 +131,53 @@ def main() -> int:
         for k in reasons[:2]:
             print(f"        {k}: {str(m[k])[:88]}")
 
+    ok_r, lines = check_replan()
     print()
-    print(f"판정: {len(UNSEEN) - bad}/{len(UNSEEN)} 상황이 이유를 남기고 끝났다")
+    print(f"  {'OK ' if ok_r else '!! '} 재계획은 필요할 때 한 번만 하고, 해도 안 되면 이유를 남긴다")
+    for ln in lines:
+        print(f"        {ln}")
+    if not ok_r:
+        bad += 1
+
+    print()
+    print(f"판정: {len(UNSEEN) + 1 - bad}/{len(UNSEEN) + 1} 항목 통과 "
+          f"(설계하지 않은 상황 {len(UNSEEN)} + 재계획 1)")
     return 1 if bad else 0
+
+
+def check_replan():
+    """재계획의 성질을 본다.
+
+    상황 판단이 대략 추정으로 "조달을 뺀다" 고 정했는데 재고로 만들 게 없으면,
+    전에는 그대로 멈췄다. 이제 조달을 넣어 한 번 다시 계획한다.
+      1 재고만으로 되는 가구(p1)는 재계획하지 않는다
+      2 x1(계란 하나) 은 재계획하고, 예산을 넘든 못 만들든 이유가 남는다
+      3 재계획은 한 번뿐이다 — 계획 단계에 REPLAN 이 두 번 찍히지 않는다
+    """
+    import personas as P
+    lines, ok = [], True
+    rows = {}
+    for pid in ("p1_야근", "x1_빈냉장고"):
+        if pid not in P.PERSONAS:
+            P.PERSONAS[pid] = {"id": pid, **UNSEEN[pid]}
+        tr = Trace()
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = run_design.design_for(pid, tr, seed=7)
+        n_replan = sum(1 for row in tr.rows if row["stage"] == "REPLAN")
+        rows[pid] = (r, n_replan)
+    r1, n1 = rows["p1_야근"]
+    rx, nx = rows["x1_빈냉장고"]
+    mx = rx["verify"]["metrics"]
+    if r1["verify"].get("replanned") or n1:
+        ok = False; lines.append("p1 이 재고로 되는데 재계획했다")
+    if not rx["verify"].get("replanned") or nx != 1:
+        ok = False; lines.append(f"x1 재계획 {rx['verify'].get('replanned')} · {nx}회")
+    reason = mx.get("시간 예산") or mx.get("메뉴 없음") or mx.get("중단")
+    if not rx["verify"]["verified"] and not reason:
+        ok = False; lines.append("x1 이 재계획 뒤에도 안 됐는데 이유가 없다")
+    lines.append(f"p1 재계획 {n1}회 · x1 재계획 {nx}회 → "
+                 f"{mx.get('메뉴') or '-'} · {str(reason or '성립')[:50]}")
+    return ok, lines
 
 
 if __name__ == "__main__":

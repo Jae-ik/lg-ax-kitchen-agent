@@ -194,15 +194,27 @@ def c8():
                 f"가열 {m.get('가열 시간(분)')}분")
 
 
-@check("만들 수 없으면 못 만든다고 말한다")
+@check("다시 계획했으면 그렇다고, 예산을 넘으면 넘는다고, 못 만들면 못 만든다고 말한다")
 def c9():
-    """'-로 정했습니다' 처럼 빈 값을 읽어 주면 무슨 일이 있었는지
-    알 수 없다. 실제로 한 번 그렇게 나갔다."""
-    out = thinq.run("배추랑 두부만 있어. 9시 반 도착이고 30분 있어")
-    text = out["explained"]["text"]
-    ok = ("만들 수 있는 것이 없" in text and "-로 정했" not in text
-          and len(text) > 30)
-    return ok, text[:88]
+    """(가) 재고로는 못 만들어 장보기를 넣어 다시 계획한 경우 — 전에는 여기서
+    "만들 수 있는 것이 없다" 로 멈췄다. 이제 만들되, 예산을 넘으면 넘는다고
+    말해야 한다. (나) 다시 계획해도 정말 못 만드는 경우는 못 만든다고
+    말해야 한다. '-로 정했습니다' 처럼 빈 값을 읽어 주면 안 된다."""
+    a = thinq.run("배추랑 두부만 있어. 9시 반 도착이고 30분 있어")
+    ta, va = a["explained"]["text"], a["result"]["verify"]
+    ok_a = ("다시 계획" in ta and ("모자랍니다" in ta) == va.get("over_budget")
+            and (va.get("over_budget") is False or not va["verified"]))
+    everything = ["대두", "갑각류", "유제품", "난류", "글루텐", "생선류", "견과류",
+                  "조개류", "두족류"]
+    fake = json.dumps({"arrive_home": "21:30", "time_budget_min": 10,
+                       "avoid": everything})
+    # 상황만 가짜 LLM 으로 읽고, 설명은 규칙으로 본다(가짜 LLM 은 설명
+    # 요청에도 같은 JSON 을 돌려주므로 설명 시험이 되지 않는다)
+    b = thinq.run("x", ask=lambda p: fake if "사용자 말:" in p else "",
+                  approve=lambda c: True)
+    tb = thinq.rule_explain(b["result"])
+    ok_b = "만들 수 있는 것이 없" in tb and "-로 정했" not in tb
+    return ok_a and ok_b, f"(가) {ta[:70]} · (나) {tb[:50]}"
 
 
 # ── 6 불변 : 판단은 측정이 한다 ────────────────────────────────────────
@@ -213,8 +225,13 @@ def c10():
     실행 결과도 같아야 한다 — 그래야 200회 반복 측정과 회귀 검사가
     계속 의미를 가진다.
     """
+    # **읽은 상황이 정말 같아야** 비교가 된다. 처음엔 이 답에 재고가 없었는데
+    # 규칙은 문장에서 된장·배추·두부를 읽었다. 둘 다 우연히 장을 봐서 같게
+    # 나왔을 뿐이고, 재계획을 넣자 차이가 드러났다.
     same = json.dumps({"arrive_home": "19:00", "time_budget_min": 45,
                        "household_size": 1,
+                       "fridge": [{"name": "배추"}, {"name": "두부"},
+                                  {"name": "된장"}],
                        "friction_reported": ["냄비 앞을 지키는 일"]})
     a = thinq.run("된장이랑 배추 두부 있고 7시 도착", ask=None)
     b = thinq.run("된장이랑 배추 두부 있고 7시 도착", ask=fake_ask(same))

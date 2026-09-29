@@ -138,6 +138,16 @@ def c5():
         if f"{heat}분" not in line:
             bad.append(f"{label}: 실행 {heat}분 인데 README 에는 "
                        f"{re.findall(r'[0-9.]+분', line)}")
+        # **식사까지 걸리는 시간**도 본다. 전에는 가열 시간만 봐서 "시간이
+        # 맞는가" 표(식사까지)가 두 번 낡는 동안(30.2 → 49.9 → 56.9분) 몰랐다.
+        # 마지막 칸이 이 상황의 예산인 줄이 그 표다.
+        meal = m.get("식사까지(분)")
+        budget = rows[pid]["verify"].get("budget_min")
+        for l in doc.splitlines():
+            cells = [c.strip() for c in l.strip().strip("|").split("|")]
+            if (l.startswith(f"| {label} |") and len(cells) == 4
+                    and cells[-1] == f"{budget}분" and cells[-2] != f"{meal}분"):
+                bad.append(f"{label}: 식사까지 실행 {meal}분 인데 README 표에는 {cells[-2]}")
     return "\n".join(bad)
 
 
