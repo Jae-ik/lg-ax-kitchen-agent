@@ -39,8 +39,57 @@ ABSORBS = {"찹쌀": 2.0, "쌀": 2.2, "국수": 1.6, "당면": 2.5, "미역": 7.
 SCUM = {"닭고기": 0.045, "돼지고기": 0.06, "소고기": 0.055}
 
 
+# ── 재료 이름 → 물리 계수 표의 종류 ──────────────────────────────────
+# 계수 표(흡수·고형분·익힘·거품)를 **이름 정확 일치**로 찾고 있었다.
+# 파싱을 바로잡아 이름이 '닭가슴살·닭다리살·삼겹살·소면·건미역' 이 되자
+# 표에 없어 계수가 0 이 됐다 — **익힘 요구량 0 이면 생고기가 익지 않아도
+# 조리가 끝난다**(끓이기 45건 중 7건). 이름을 종류로 풀어 찾는다.
+# 순서가 중요하다(앞에서 먼저 걸린다). None 은 "계수 없음" 이다.
+KIND_RULES = (
+    # 이름에 들어 있지만 그 종류가 아닌 것을 먼저 막는다
+    ("떡갈비", "돼지고기"),     # 떡이 아니라 다진 고기다(소·돼지 — 안전측 돼지)
+    ("쌀뜨물", None), ("쌀겨", None), ("찹쌀가루", None),
+    ("콩나물", None), ("콩가루", None), ("콩비지", None), ("콩고기", None),
+    ("땅콩", None),
+    ("단호박", None),
+    # 곡물·면·떡 — 물을 먹는다
+    ("당면", "당면"), ("찹쌀", "찹쌀"), ("쌀국수", "국수"), ("현미", "쌀"),
+    ("쌀", "쌀"),
+    ("국수", "국수"), ("소면", "국수"), ("메밀면", "국수"), ("라면", "국수"),
+    ("우동", "국수"), ("스파게티", "국수"), ("파스타", "국수"), ("펜네", "국수"),
+    ("떡", "떡"),
+    # 마른 것만 물을 먹는다 — 불린 미역·표고는 이미 먹었다
+    ("건미역", "미역"), ("미역", None),
+    ("건표고", "표고버섯"), ("표고", "표고버섯"),
+    ("검은콩", "콩"), ("강낭콩", "콩"), ("백태", "콩"), ("대두", "콩"), ("콩", "콩"),
+    # 고기 — 익혀야 한다
+    ("닭", "닭고기"), ("오리", "닭고기"),          # 가금류(오리 계수는 가정)
+    ("돼지", "돼지고기"), ("삼겹", "돼지고기"), ("목살", "돼지고기"),
+    ("다짐육", "돼지고기"), ("베이컨", "돼지고기"),
+    ("소고기", "소고기"), ("쇠고기", "소고기"), ("한우", "소고기"),
+    ("우둔", "소고기"), ("양지", "소고기"), ("등심", "소고기"), ("사태", "소고기"),
+    # 채소·두부
+    ("두부", "두부"), ("배추", "배추"), ("애호박", "애호박"), ("감자", "감자"),
+)
+
+
+def kind_of(name: str):
+    """재료 이름을 계수 표의 종류로. 한 글자 '무' 는 정확히 같을 때만."""
+    if name in ("무", "무 "):
+        return "무"
+    for key, kind in KIND_RULES:
+        if key in name:
+            return kind
+    return name        # 표에 그대로 있으면 그 이름으로 찾힌다
+
+
+def _coef(table, name, default=0.0):
+    k = kind_of(name)
+    return table.get(k, default) if k is not None else default
+
+
 def scum_amount(ingredients) -> float:
-    return sum(SCUM.get(i["name"], 0.0) * i.get("qty_g", 0) for i in ingredients)
+    return sum(_coef(SCUM, i["name"]) * i.get("qty_g", 0) for i in ingredients)
 
 
 # 고형분으로 남는 비율 (나머지는 국물에 섞인다)
@@ -52,13 +101,13 @@ SOLID_RATIO = {"닭고기": 0.85, "돼지고기": 0.85, "소고기": 0.85, "두�
 
 def absorb_capacity(ingredients) -> float:
     """이 재료들이 빨아들일 물의 총량."""
-    return sum(ABSORBS.get(i["name"], 0.0) * i.get("qty_g", 0)
+    return sum(_coef(ABSORBS, i["name"]) * i.get("qty_g", 0)
                for i in ingredients)
 
 
 def solid_mass(ingredients) -> float:
     """국물이 되지 않고 고형으로 남는 무게."""
-    return sum(SOLID_RATIO.get(i["name"], 0.5) * i.get("qty_g", 0)
+    return sum(_coef(SOLID_RATIO, i["name"], 0.5) * i.get("qty_g", 0)
                for i in ingredients)
 
 
@@ -84,8 +133,52 @@ COOK_UNITS = {"닭고기": 1.05, "돼지고기": 1.2, "소고기": 0.9, "감자"
 
 def cook_units_needed(ingredients) -> float:
     """가장 오래 걸리는 재료가 다 익어야 끝난다."""
-    return max((COOK_UNITS.get(i["name"], 0.0) * i.get("qty_g", 0)
+    return max((_coef(COOK_UNITS, i["name"]) * i.get("qty_g", 0)
                 for i in ingredients), default=0.0)
+
+# ── 국물 요리는 국물이 남아야 한다 ────────────────────────────────────
+# 공개 레시피에는 물이 적혀 있지 않다(된장국 1인분 재료 합 75g). 물을
+# "빨아들일 만큼 + 목표까지 졸일 만큼" 만 부으면 **목표에 닿는 순간 국물이
+# 0 이다** — 4인분 삼계탕이 국물 80g · 눌어붙음 0.90 으로 끝났다.
+#
+# 끝났을 때 남길 양은 **식품 등의 표시기준 [별표 3] 1회 섭취참고량**에서
+# 가져온다(즉석조리식품: 국·탕 250g, 찌개 200g, 죽 250g, 스프 150g).
+# 이것은 건더기를 포함한 한 그릇의 양이므로, 1인분 국물 = 참고량 − 건더기.
+# 건더기가 참고량보다 많은 탕(삼계탕 1인분 건더기+흡수 약 410g)은 그 식이
+# 0 이 되므로 **참고량의 절반을 최소 국물로 둔다 — 이 절반은 가정이다.**
+SERVING_G = {"국탕": 250, "찌개": 200, "죽": 250, "스프": 150}
+MIN_BROTH_SHARE = 0.5
+
+
+def soup_kind(rec: dict):
+    """국물 요리면 그 종류, 아니면 None. 내 기록은 물이 기록에 들어 있다."""
+    import re
+    if not str(rec.get("record_id", "")).startswith("pub_"):
+        return None
+    name, cat = rec.get("menu", ""), rec.get("category")
+    if cat in ("국&찌개", "일품") or "죽" in name:
+        if "찌개" in name:
+            return "찌개"
+        if "죽" in name:
+            return "죽"
+        if re.search(r"(스프|수프|차우더)", name) and "파스타" not in name:
+            return "스프"
+        if re.search(r"(탕|국)(?!수)", name):
+            return "국탕"
+    if cat == "국&찌개":
+        return "국탕"
+    return None
+
+
+def broth_of(rec: dict, placed: list) -> float:
+    """끝났을 때 남길 국물(g). 국물 요리가 아니면 0."""
+    kind = soup_kind(rec)
+    if not kind:
+        return 0.0
+    n = max(1.0, float(rec.get("servings") or 1))
+    per = SERVING_G[kind]
+    body = (solid_mass(placed) + absorb_capacity(placed)) / n
+    return round(max(per - body, per * MIN_BROTH_SHARE) * n, 1)
 
 
 # 조리 외 단계의 고정 소요 시간(분). 설계 층의 STAGE_COSTS 와 같은 값이며,
@@ -173,7 +266,7 @@ def recipe_to_record(r: dict) -> dict:
     ratio, soil = METHOD_DEFAULT.get(r.get("method"), METHOD_DEFAULT["기타"])
     total = sum(i["qty_g"] for i in r["ingredients"])
     return {"record_id": f"pub_{r['recipe_id']}", "menu": r["menu"],
-            "method": r.get("method"),
+            "method": r.get("method"), "category": r.get("category"),
             "saved_by": "공개 레시피", "ingredients": r["ingredients"],
             "initial_mass_g": round(total), "target_mass_ratio": ratio,
             "cook_minutes_observed": None, "soil_score": soil,
@@ -645,7 +738,8 @@ def build_tasks(constraints: dict) -> list:
     def _prep_bind(ctx):
         return {"record": ctx["record"], "weigh": K.prep_weigh,
                 "available": lambda n: K.fridge_check(n) is not None,
-                "absorb_of": absorb_capacity, "solid_of": solid_mass}
+                "absorb_of": absorb_capacity, "solid_of": solid_mass,
+                "broth_of": broth_of}
 
     def _prep_absorb(ctx, out):
         ctx["mass_g"] = out["total_mass_g"]
@@ -653,6 +747,7 @@ def build_tasks(constraints: dict) -> list:
         ctx["absorb_cap_g"] = out.get("absorb_cap_g") or 0.0
         ctx["solid_g"] = out.get("solid_g") or 0.0
         ctx["water_added_g"] = out.get("water_added_g") or 0.0
+        ctx["broth_g"] = out.get("broth_g") or 0.0
         ctx["start_temp_c"] = out.get("start_temp_c", 20.0)
         ctx["scum_g"] = scum_amount(ctx["record"].get("ingredients", []))
         ctx["extra_water_g"] = out["extra_water_g"]
@@ -1113,8 +1208,13 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                 + (f" (에이전트가 없으면 {cookm}분 내내)" if cookm else ""))
             metrics["지켜보는 시간(분)"] = attended
         if ctx.get("water_added_g"):
-            metrics["물 보충"] = (f"재료가 빨아들일 {ctx['water_added_g']}g 을 "
-                              f"미리 더 부었다")
+            # 이제 물에는 흡수분과 **남길 국물**이 함께 들어간다. "빨아들일
+            # 만큼" 이라고만 쓰면 국물 몫을 흡수로 잘못 읽는다.
+            metrics["물 보충"] = (f"{ctx['water_added_g']}g 을 부었다 "
+                              f"(흡수 {round(ctx.get('absorb_cap_g') or 0)}g"
+                              + (f" + 남길 국물 {round(ctx['broth_g'])}g"
+                                 if ctx.get("broth_g") else "")
+                              + " 포함)")
         if ctx.get("scale_basis"):
             metrics["조리량"] = (ctx["scale_basis"]
                               + (" · 기기 용량에 걸림" if ctx.get("scale_capped") else ""))

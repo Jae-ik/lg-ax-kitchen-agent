@@ -272,6 +272,9 @@ class Cooker:
     power: int = 0                    # 0~5
     extra_water_g: float = 0.0
     soil: float = 0.0                 # 눌어붙음 누적 (0~1)
+    # 이 건더기 비율 이상이면 눌어붙음이 건더기 양에 더는 비례하지 않는다.
+    # 저장된 된장찌개(약 0.33)가 이 위에 있어 기존 결과가 바뀌지 않는다. 가정.
+    SOIL_SOLID_REF: float = 0.25
     added_g: float = 0.0              # 조리 도중 넣은 양 (중간 투입)
     capacity_g: float = 1100.0        # 이 냄비에 담기는 최대량
     solid_g: float = 0.0              # 고형분 (재료 자체 무게)
@@ -562,7 +565,14 @@ class Cooker:
         # min(1.0, ...) 으로 자르면 긴 조리에서 **상한에 붙어 정보를 잃는다**
         # (24분짜리 삼계탕이 1.0 으로 포화해 흔들림도 0 이 됐다).
         # 1 - exp(-누적) 은 1 에 점근하되 닿지 않아 구분이 남는다.
-        raw_soil = boil * (0.30 + dryness) * (self.power / 5) * minutes * 0.30
+        # **탈 것이 있어야 눌어붙는다.** 전에는 이 항이 건더기를 보지 않아
+        # 맹물 2kg 을 30분 끓여도 0.581(강력 코스 기준 0.55 초과), 건더기 300g
+        # 국도 맹물과 똑같았다. 건더기 비율이 SOIL_SOLID_REF(찌개 수준) 이상이면
+        # 전과 같고, 그보다 묽으면 비례해 줄인다 — 그 경계값은 가정이다.
+        share = (self.solid_g / self.mass_g) if self.mass_g else 0.0
+        presence = min(1.0, share / self.SOIL_SOLID_REF)
+        raw_soil = (boil * (0.30 + dryness) * (self.power / 5) * minutes * 0.30
+                    * presence)
         self.soil += raw_soil * stir_factor
         # 교반 덕에 덜어낸 몫. 이 몫이 STIR_RELIEF 에 걸려 있으므로,
         # 그 상수가 틀린 만큼 눌어붙음 추정도 틀린다.

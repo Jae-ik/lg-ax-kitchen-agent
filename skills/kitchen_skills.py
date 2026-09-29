@@ -225,6 +225,8 @@ class PrepSkill(Skill):
         "min_fill_ratio": "float          목표의 이 비율도 못 담으면 넘기지 않는다",
         "absorb_of": "(재료들) -> float   빨아들일 물의 양. 그만큼 더 붓는다",
         "solid_of": "(재료들) -> float    국물이 되지 않는 고형분",
+        "broth_of": "(기록, 재료들) -> float   끝났을 때 남겨야 할 국물(g). "
+                    "국물 요리가 아니면 0. 무엇이 국물 요리인지는 도메인이 안다",
     }
     reusable_for = ["조리 전 계량", "세제 투입량 산정", "정수량 배분"]
     requires = ("stock_complete", "chosen_record")
@@ -232,7 +234,7 @@ class PrepSkill(Skill):
 
     def run(self, record: dict, weigh, available,
             min_fill_ratio: float = 0.5,
-            absorb_of=None, solid_of=None, **_) -> SkillResult:
+            absorb_of=None, solid_of=None, broth_of=None, **_) -> SkillResult:
         total, extra, ev, missing = 0.0, 0.0, [], []
         short = {}
         # 계량은 전부 하지만 **처음부터 냄비에 들어가는 것**은 일부다.
@@ -309,8 +311,9 @@ class PrepSkill(Skill):
         total += record.get("initial_mass_g", 0) - listed
         total -= sum(x["grams"] for x in later)
 
+        broth_g = broth_of(record, placed) if broth_of else 0.0
         water_added = 0.0
-        if absorb_g > 0:
+        if absorb_g > 0 or broth_g > 0:
             # 빨아들일 만큼만 부으면 모자란다. **졸일 물까지** 있어야 한다.
             #
             #   총량 M 중 고형 S 와 흡수 A 는 졸일 수 없다.
@@ -318,17 +321,20 @@ class PrepSkill(Skill):
             #   자유 수분 M - S - A ≥ M(1-r),  즉  M ≥ (S+A)/r 이어야 한다.
             #
             # 흡수량만 채웠다가 삼계탕이 0.9352 에서 국물이 바닥나 멈췄다.
+            # 국물 요리는 **끝났을 때 남길 국물** B 까지 더한다: M ≥ (S+A+B)/r.
+            # B 가 없으면 목표에 닿는 순간 국물이 0 이다(삼계탕 국물 80g).
             r = record.get("target_mass_ratio") or 1.0
-            need_total = (solid_g + absorb_g) / max(0.05, r) * 1.05   # 5% 여유
+            need_total = ((solid_g + absorb_g + broth_g) / max(0.05, r)
+                          * (1.0 if broth_g else 1.05))   # 국물이 없으면 5% 여유
             # 흡수량은 need_total 에 **이미 포함**돼 있다. max(absorb_g, ...) 로
             # 두면 기록에 물이 이미 들어 있어도 흡수량만큼 또 붓는다 —
             # 두 번째 조리에서 2036g 이 3038g 이 되어 용량 상한에 걸렸다.
             water_added = round(max(0.0, need_total - total), 1)
             total += water_added
-            ev.append(f"재료가 물 {round(absorb_g)}g 을 빨아들인다. "
-                      f"목표 {r} 까지 졸이려면 고형 {round(solid_g)}g + 흡수분을 "
-                      f"빼고도 졸일 물이 남아야 하므로 총 {round(need_total)}g 필요 "
-                      f"→ {water_added}g 을 더 붓는다")
+            ev.append((f"재료가 물 {round(absorb_g)}g 을 빨아들인다. " if absorb_g else "")
+                      + (f"끝났을 때 국물 {round(broth_g)}g 을 남긴다. " if broth_g else "")
+                      + f"목표 {r} 까지 졸이려면 총 {round(need_total)}g 필요 "
+                      f"→ 물 {water_added}g 을 붓는다")
         ev.append(f"총 {round(total)}g (기록 {record.get('initial_mass_g')}g), "
                   f"추가 수분 합 {round(extra, 1)}g"
                   + (f", 고형분 {round(solid_g)}g" if solid_g else ""))
@@ -356,7 +362,7 @@ class PrepSkill(Skill):
                             "add_later": later,
                             "absorb_cap_g": round(absorb_g, 1),
                             "solid_g": round(solid_g, 1),
-                            "water_added_g": water_added,
+                            "water_added_g": water_added, "broth_g": round(broth_g, 1),
                             "missing": missing, "short_g": short}, ev)
 
 

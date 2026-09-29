@@ -173,10 +173,13 @@ def c7():
 
 @check("저으면 눌어붙음이 줄고, 오래 안 저으면 다시 늘어난다")
 def c8():
+    # 건더기가 있어야 한다. 처음엔 **맹물 400g** 으로 재고 있었는데, 맹물은
+    # 탈 것이 없어 눌어붙지 않는다 — 눌어붙음 식이 건더기를 보게 되자 0 대 0
+    # 이 됐다. 찌개 수준(건더기 약 30%)으로 잰다.
     got = {}
     for stir in (False, True):
         c = _pot()
-        c.start(400, 0, power=5)
+        c.start(400, 0, power=5, solid_g=120)
         while c.temp_c < 99.9:
             c.tick(0.25)
         c.soil = 0.0
@@ -480,6 +483,73 @@ def c_cache():
     names = {i["name"] for r in rs for i in r["ingredients"]}
     ok = not bad and "강" not in names and not any(n.startswith("재료 ") for n in names)
     return ok, f"어긋난 레시피 {len(bad)}건 · '강' {'있음' if '강' in names else '없음'}"
+
+
+@check("맹물은 눌어붙지 않고, 건더기가 많을수록 더 눌어붙는다")
+def c_soil_solid():
+    """눌어붙음 식이 건더기를 보지 않아 맹물 2kg 을 30분 끓여도 0.581
+    (강력 세척 기준 0.55 초과)이었고, 건더기 300g 국도 맹물과 같았다."""
+    import math
+    import kitchen as K
+
+    def boil(mass, solid, minutes=30):
+        K.reset(seed=7)
+        c = K.COOKER
+        c.deterministic = True
+        c.start(initial_mass_g=mass, solid_g=solid, power=3)
+        for _ in range(minutes * 4):
+            c.tick(0.25)
+        return round(1 - math.exp(-c.soil), 3)
+    got = [boil(2000, 0), boil(2000, 300), boil(620, 205), boil(1000, 700)]
+    ok = got[0] == 0 and got[0] < got[1] < got[2] <= got[3]
+    return ok, f"맹물 {got[0]} · 국 {got[1]} · 찌개 {got[2]} · 조림 {got[3]}"
+
+
+@check("국물 요리는 끝났을 때 국물이 남는다")
+def c_broth():
+    """공개 레시피에는 물이 적혀 있지 않다. 흡수분과 졸일 만큼만 부으면
+    목표에 닿는 순간 국물이 0 이다 — 4인분 삼계탕이 국물 80g 으로 끝났다.
+    1회 섭취참고량(국·탕 250g)을 근거로 남길 국물을 더한다."""
+    import contextlib
+    import run_design
+    import store
+    import kitchen as K
+    import kitchen_domain as KD
+    from orchestrator import Trace
+    old_q, old_r = store.STORES[0].delivery_min, run_design.MAX_REPLANS
+    store.STORES[0].delivery_min = 0          # 배송 대기 없이 조리 물리만 본다
+    run_design.MAX_REPLANS = 0
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = run_design.design_for("p3_알레르기", Trace(), seed=7)
+        c = K.COOKER
+        broth = c.mass_g - c.solid_g - c.absorbed_g
+        n = 4
+        want = KD.SERVING_G["국탕"] * KD.MIN_BROTH_SHARE * n
+    finally:
+        store.STORES[0].delivery_min, run_design.MAX_REPLANS = old_q, old_r
+    ok = (r["verify"]["metrics"].get("사용한 기록") == "pub_639"
+          and broth >= want * 0.9)
+    return ok, (f"삼계탕 4인분 끝난 국물 {round(broth)}g (남길 목표 {round(want)}g) · "
+                f"{r['verify']['metrics'].get('물 보충')}")
+
+
+@check("고기는 이름이 달라도 익혀야 끝난다")
+def c_meat_names():
+    """계수 표를 이름 정확 일치로 찾아 '닭가슴살·닭다리살·베이컨' 의 익힘
+    요구량이 0 이었다 — 생고기가 익지 않아도 졸임만 맞으면 끝났다."""
+    import kitchen_domain as KD
+    names = ["닭가슴살", "닭다리살", "베이컨", "삼겹살", "소고기 양지", "오리고기",
+             "떡갈비"]
+    zero = [n for n in names
+            if KD.cook_units_needed([{"name": n, "qty_g": 100}]) == 0]
+    wrong_absorb = [n for n, want in (("소면", True), ("건미역", True),
+                                      ("떡국 떡", True), ("콩나물", False),
+                                      ("쌀뜨물", False), ("미역", False),
+                                      ("떡갈비", False))
+                    if (KD.absorb_capacity([{"name": n, "qty_g": 100}]) > 0) != want]
+    ok = not zero and not wrong_absorb
+    return ok, f"익힘 0 인 고기 {zero} · 흡수 판정이 틀린 것 {wrong_absorb}"
 
 
 @check("같은 재료가 두 번 나오면 합친다")
