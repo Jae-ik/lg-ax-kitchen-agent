@@ -582,6 +582,83 @@ def m6():
                 f"잘못된 선호 {got[3]} (버림 {len(u3['rejected'])}건)")
 
 
+# ── 10 퇴근을 무엇으로 아는가 — 메시지·위치 (2026-09-30) ──────────────
+@check("'지금 퇴근해' 를 퇴근 시각으로 읽고, 지금을 모르면 지어내지 않는다")
+def n1():
+    def p(t, now=None, profile=None):
+        return thinq.understand(t, now=now, profile=profile)["persona"]
+    a = p("지금 퇴근해, 40분 걸려", now="21:03")
+    b = p("30분 뒤 퇴근이야 37분 걸려", now="20:33")
+    c = p("지금 퇴근해")                                  # 지금이 몇 시인지 모름
+    d = p("6시 반에 퇴근하고 7시 10분 도착")               # 이동은 두 시각의 차
+    e = p("두부 있어", profile={"commute_min": 37})        # 이동만 알고 퇴근은 모름
+    got = [(x.get("leave_office"), x.get("commute_min"), x.get("arrive_home"))
+           for x in (a, b, c, d, e)]
+    ok = (got[0] == ("21:03", 40, "21:43") and a["time_budget_min"] == 45
+          and got[1] == ("21:03", 37, "21:40")
+          and got[2][:2] == (None, None)
+          and got[3] == ("18:30", 40, "19:10")
+          and got[4][:2] == (None, None))
+    # '40분 걸려' 를 쓸 수 있는 시간(예산)으로 읽으면 안 된다
+    return ok, f"{got} · 예산 {a['time_budget_min']}(기본값 — '40분 걸려' 를 예산으로 안 읽음)"
+
+
+@check("위치는 동의·퇴근 시간대·머무름을 모두 통과해야 퇴근으로 본다")
+def n2():
+    import location as L
+    ex = lambda t: {"at": t, "kind": "exit", "place": "office"}
+    en = lambda t: {"at": t, "kind": "enter", "place": "office"}
+    no, w0 = L.detect_leave([ex("21:03")], consent=False, commute_min=37)
+    lunch, _ = L.detect_leave([ex("12:10")], consent=True, commute_min=37)
+    back, _ = L.detect_leave([ex("21:00"), en("21:03")], consent=True, commute_min=37)
+    ok_, _ = L.detect_leave([ex("21:00"), en("21:03"), ex("21:03")],
+                            consent=True, commute_min=37)
+    # 인과: 판단 시각(나선 뒤 5분) 뒤에 다시 들어온 것은 판단 때 알 수 없다
+    later, _ = L.detect_leave([ex("21:03"), en("21:30")], consent=True, commute_min=37)
+    ok = (no is None and "동의" in w0[0] and lunch is None and back is None
+          and ok_ and (ok_["leave_office"], ok_["commute_min"], ok_["arrive_home"])
+          == ("21:08", 32, "21:40")
+          and later and later["leave_office"] == "21:08")
+    return ok, (f"동의 없음 {no} · 점심 {lunch} · 5분 안 복귀 {back} · "
+                f"퇴근 {ok_ and ok_['leave_office']} (남은 {ok_ and ok_['commute_min']}분)")
+
+
+@check("그날 말이 있으면 위치보다 말을 믿는다")
+def n3():
+    u = thinq.understand("지금 퇴근해", now="21:10",
+                         profile={"commute_min": 37, "location_consent": True},
+                         location=[{"at": "21:03", "kind": "exit", "place": "office"}])
+    p = u["persona"]
+    ok = (p["leave_office"] == "21:10" and p["leave_source"] == "message"
+          and any("위치는 보지 않는다" in r for r in u["read"]))
+    return ok, f"퇴근 {p['leave_office']} ({p['leave_source']})"
+
+
+@check("퇴근을 알면 두부 없는 25분 가구도 성립하고, 위치는 확인 시간만큼 잃는다")
+def n4():
+    """모름 → 메뉴 못 정함. 메시지·위치(이동 40분) → 성립.
+    이동 30분이면 위치는 5분 확인 뒤 25분 < 배송 27분이라 실패, 메시지는 성립."""
+    food = "25분 안에 먹어야 해. 냉장고에 배추랑 된장 있어"
+    auto = {"order_mode": "auto"}
+
+    def ok_of(**kw):
+        r = thinq.run(**kw)["result"]
+        return r["verify"]["verified"], r["verify"]["metrics"].get("식사까지(분)")
+    loc = [{"at": "18:40", "kind": "exit", "place": "office"}]
+    got = {
+        "모름": ok_of(text=f"7시 20분 도착. {food}", profile=auto),
+        "메시지40": ok_of(text=f"지금 퇴근해, 40분 걸려. {food}", now="18:40", profile=auto),
+        "위치40": ok_of(text=food, location=loc,
+                      profile=dict(auto, commute_min=40, location_consent=True)),
+        "메시지30": ok_of(text=f"지금 퇴근해, 30분 걸려. {food}", now="18:40", profile=auto),
+        "위치30": ok_of(text=food, location=loc,
+                      profile=dict(auto, commute_min=30, location_consent=True)),
+    }
+    ok = (not got["모름"][0] and got["메시지40"][0] and got["위치40"][0]
+          and got["메시지30"][0] and not got["위치30"][0])
+    return ok, " · ".join(f"{k} {'성립' if v[0] else '실패'}" for k, v in got.items())
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

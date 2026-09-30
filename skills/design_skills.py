@@ -69,7 +69,10 @@ class SituationReadSkill(Skill):
         T.update(terms or {})
         need_min = sum(stage_costs.values())
         budget = persona.get("time_budget_min", 999)
-        commute = persona.get("commute_min", 0)
+        # 이동 시간은 **퇴근 시각을 알 때만** 쓴다. 이동 시간만 알고 언제
+        # 나서는지 모르면 집 밖의 시간을 쓸 수 없다.
+        commute = (persona.get("commute_min", 0) if persona.get("leave_office")
+                   else 0)
         buy_min = stage_costs.get("조달", 0)
         ev = [f"보고된 불편 {len(persona.get('friction_reported', []))}건",
               f"필요 시간 {need_min}분 / 귀가 후 사용 가능 {budget}분"]

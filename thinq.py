@@ -96,7 +96,11 @@ PROMPT = """사용자가 한국어로 말한 상황에서 아래 항목을 뽑�
   order_mode         "auto"|"ask"|"self"  오늘 장보기를 어떻게 할지 — 알아서
                      주문(auto) · 묻고 사기(ask) · 직접 사 가기(self). 말하지
                      않았으면 넣지 마라
+  leave_office       "HH:MM"  회사를 나서는(나선) 시각. "지금 퇴근" 이면 아래
+                     지금 시각. 지금 시각이 "모름" 이면 넣지 마라
+  commute_min        int      집까지 걸리는 분 ("40분 걸려")
 
+지금 시각: {now}
 사용자 말: {text}"""
 
 
@@ -179,7 +183,7 @@ def how() -> str:
 
 
 # ── 자연어 → 상황 ──────────────────────────────────────────────────────
-def rule_understand(text: str) -> dict:
+def rule_understand(text: str, now: str | None = None) -> dict:
     """키 없이 읽는다. LLM 이 없을 때의 폴백이자, LLM 결과의 대조군이다.
 
     정규식이라 한계가 뚜렷하다 — 그래서 읽어낸 근거를 함께 남긴다.
@@ -187,19 +191,51 @@ def rule_understand(text: str) -> dict:
     """
     got, why = {}, []
 
-    m = re.search(r"(\d{1,2})\s*시\s*(반|(\d{1,2})\s*분)?", text)
-    if m:
+    # 시각: 뒤에 '퇴근' 이 오면 퇴근 시각, 아니면 귀가 시각이다.
+    # ("6시 반에 퇴근" 을 귀가로 읽으면 이동 시간이 0 이 된다)
+    for m in re.finditer(r"(\d{1,2})\s*시\s*(반|(\d{1,2})\s*분)?", text):
         h = int(m.group(1))
         mi = 30 if m.group(2) == "반" else int(m.group(3) or 0)
         if "저녁" in text or "밤" in text or "늦" in text or h < 12:
             h = h + 12 if h < 12 else h
-        got["arrive_home"] = f"{h % 24:02d}:{mi:02d}"
-        why.append(f"'{m.group(0)}' → 귀가 {got['arrive_home']}")
+        hhmm = f"{h % 24:02d}:{mi:02d}"
+        if re.match(r"\s*(에|쯤|쯤에)?\s*퇴근", text[m.end():]):
+            got["leave_office"] = hhmm
+            why.append(f"'{m.group(0)} 퇴근' → 퇴근 {hhmm}")
+        elif "arrive_home" not in got:
+            got["arrive_home"] = hhmm
+            why.append(f"'{m.group(0)}' → 귀가 {hhmm}")
 
-    m = re.search(r"(\d{1,3})\s*분", text)
-    if m and "시" not in text[max(0, m.start() - 3):m.start()]:
+    # "N분" 은 여럿이다 — 걸리는 시간(40분 걸려)·퇴근까지(30분 뒤 퇴근)는
+    # 쓸 수 있는 시간이 아니다. 전에는 첫 "N분" 을 무조건 예산으로 읽었다.
+    for m in re.finditer(r"(\d{1,3})\s*분", text):
+        if "시" in text[max(0, m.start() - 3):m.start()]:
+            continue
+        if re.match(r"\s*(정도\s*)?(걸|뒤|후|거리)", text[m.end():]):
+            continue
         got["time_budget_min"] = int(m.group(1))
         why.append(f"'{m.group(0)}' → 쓸 수 있는 시간")
+        break
+
+    # 퇴근: "지금 퇴근해" 는 **지금이 몇 시인지** 알아야 시각이 된다.
+    # 모르면 지어내지 않는다(now 는 호출자가 준다 — 실제 기기라면 휴대폰 시계).
+    m = re.search(r"(\d{1,3})\s*분\s*(정도\s*)?(걸려|걸림|걸리|거리)", text)
+    if m:
+        got["commute_min"] = int(m.group(1))
+        why.append(f"'{m.group(0)}' → 집까지 {m.group(1)}분")
+    m = re.search(r"(\d{1,3})\s*분\s*(뒤|후)(에)?\s*퇴근", text)
+    m_now = re.search(r"(지금|방금|이제)\s*퇴근|퇴근\s*(해|했|하는\s*중|중이|길이)",
+                      text)
+    if "leave_office" not in got and (m or m_now):
+        if now and _is_clock(now):
+            base = int(now[:2]) * 60 + int(now[3:])
+            t = base + (int(m.group(1)) if m else 0)
+            got["leave_office"] = f"{(t // 60) % 24:02d}:{t % 60:02d}"
+            why.append(f"'{(m or m_now).group(0)}' (지금 {now}) → 퇴근 "
+                       f"{got['leave_office']}")
+        else:
+            why.append(f"'{(m or m_now).group(0)}' — 지금이 몇 시인지 몰라 "
+                       f"퇴근 시각을 정하지 않았다")
 
     m = re.search(r"(\d)\s*(명|인|식구)", text)
     if m:
@@ -292,10 +328,13 @@ def _friction_from(text: str) -> list:
 
 # 가구가 **한 번 정해 두는 선호**. 그날 말이 이것을 덮는다.
 # 안전 항목(기피·나트륨)은 여기 두지 않는다 — 그것은 말할 때마다 승인을 거친다.
-PROFILE_KEYS = ("order_mode", "auto_limit_krw")
+PROFILE_KEYS = ("order_mode", "auto_limit_krw",
+                # 퇴근을 알아보는 데 쓰는 가구 사실·선호 (위치는 동의해야 쓴다)
+                "commute_min", "location_consent", "leave_window")
 
 
-def understand(text: str, ask=None, profile: dict | None = None) -> dict:
+def understand(text: str, ask=None, profile: dict | None = None,
+               now: str | None = None, location: list | None = None) -> dict:
     """자연어를 상황 dict 로 바꾼다.
 
     ask 를 주면 그것으로 읽고, 안 주면 규칙으로 읽는다. **어느 쪽이든
@@ -306,9 +345,9 @@ def understand(text: str, ask=None, profile: dict | None = None) -> dict:
     README 에만 있었다 — 그날 말이 없으면 늘 기본값(ask)이었다.
     """
     if ask is None:
-        got = rule_understand(text)
+        got = rule_understand(text, now=now)
     else:
-        raw = ask(PROMPT.replace("{text}", text))
+        raw = ask(PROMPT.replace("{text}", text).replace("{now}", now or "모름"))
         fields, why = _parse_json(raw)
         got = {"fields": fields, "read": why, "by": "LLM"}
 
@@ -319,6 +358,7 @@ def understand(text: str, ask=None, profile: dict | None = None) -> dict:
     rejected += [f"선호 {k}: 가구 선호로 두지 않는 항목이라 버렸다"
                  for k in (profile or {}) if k not in PROFILE_KEYS]
     persona = {**_DEFAULT, **pref, **clean}
+    _leave_from(persona, clean, location, got["read"])
     for k in PROFILE_KEYS:
         if k in clean and k in pref and clean[k] != pref[k]:
             got["read"].append(f"{k}: 정해 둔 {pref[k]} → 오늘은 {clean[k]}")
@@ -327,6 +367,53 @@ def understand(text: str, ask=None, profile: dict | None = None) -> dict:
     confirm = [k for k in NEEDS_CONFIRM if k in clean]
     return {"persona": persona, "read": got["read"], "by": got["by"],
             "rejected": rejected, "needs_confirm": confirm}
+
+
+def _leave_from(persona: dict, said: dict, location, read: list) -> None:
+    """퇴근을 무엇으로 알았는지 정하고 귀가 시각을 맞춘다.
+
+    믿는 순서: **그날 말(확정) > 위치(추정) > 없음.** 위치는 점심·외근도
+    '회사를 나섬' 으로 보이므로 말이 있으면 말을 따른다.
+    이동 시간만 알고 퇴근 시각을 모르면 선제 주문을 하지 않는다 —
+    전에는 commute_min 만 있어도 선제 주문 가구로 판단될 수 있었다.
+    """
+    import location as L
+    if "leave_office" in said:
+        persona["leave_source"] = "message"
+        if location:
+            read.append("위치: 그날 말(퇴근)이 있어 위치는 보지 않는다")
+    elif location is not None:
+        found, why = L.detect_leave(
+            location, consent=bool(persona.get("location_consent")),
+            commute_min=persona.get("commute_min"),
+            window=persona.get("leave_window"))
+        read.extend(f"위치: {w}" for w in why)
+        if found:
+            persona.update({k: v for k, v in found.items() if k != "left_at"})
+            return                      # 귀가 시각은 위치가 이미 맞췄다
+    if not persona.get("leave_office"):
+        if persona.pop("commute_min", None) is not None:
+            read.append("집까지 걸리는 시간은 알지만 퇴근을 몰라 퇴근길에 할 일을 "
+                        "정하지 않았다")
+        return
+    lv = L._m(persona["leave_office"])
+    commute = persona.get("commute_min")
+    if "arrive_home" in said and commute is None:
+        commute = (L._m(said["arrive_home"]) - lv) % (24 * 60)
+        if 0 < commute <= 180:
+            persona["commute_min"] = commute
+            read.append(f"퇴근 {persona['leave_office']} · 귀가 {said['arrive_home']} "
+                        f"→ 집까지 {commute}분")
+    if persona.get("commute_min") is None:
+        read.append("퇴근은 알지만 집까지 걸리는 시간을 몰라 퇴근길에 할 일을 "
+                    "정하지 않았다")
+        persona.pop("leave_office", None)
+        persona.pop("leave_source", None)
+        return
+    if "arrive_home" not in said:
+        persona["arrive_home"] = L._hhmm(lv + persona["commute_min"])
+        read.append(f"퇴근 {persona['leave_office']} + {persona['commute_min']}분 → "
+                    f"귀가 {persona['arrive_home']}")
 
 
 def _parse_json(raw: str):
@@ -363,6 +450,11 @@ def _validate(fields: dict):
         "order_mode": (str, lambda v: v in ("auto", "ask", "self")),
         # 자동 주문 1회 상한(원). 0 이면 사실상 자동 주문을 끈다.
         "auto_limit_krw": (int, lambda v: 0 <= v <= 200000),
+        "leave_office": (str, _is_clock),
+        "commute_min": (int, lambda v: 1 <= v <= 180),
+        "location_consent": (bool, lambda v: True),
+        "leave_window": (list, lambda v: len(v) == 2
+                         and all(isinstance(x, str) and _is_clock(x) for x in v)),
         # 이름만 있으면 받되 **나머지는 우리가 채운다.** 사용자는
         # "배추 있어" 라고만 말하고 보관일을 말하지 않는다. LLM 도
         # 그렇게 준다 — 실제로 stored_days 가 빠진 항목이 와서
@@ -549,7 +641,8 @@ def _invented_numbers(text: str, metrics: dict) -> list:
 
 # ── 전체 ───────────────────────────────────────────────────────────────
 def run(text: str, ask=None, seed: int = 7, approve=None,
-        profile: dict | None = None) -> dict:
+        profile: dict | None = None, now: str | None = None,
+        location: list | None = None) -> dict:
     """자연어 한 줄에서 실행 결과와 설명까지.
 
     **안전 항목(기피·나트륨)을 읽었으면 승인 없이 실행하지 않는다.**
@@ -567,7 +660,7 @@ def run(text: str, ask=None, seed: int = 7, approve=None,
     from orchestrator import Trace
     from recipe_parse import expand_avoid
 
-    u = understand(text, ask=ask, profile=profile)
+    u = understand(text, ask=ask, profile=profile, now=now, location=location)
     avoid = u["persona"].get("avoid", [])
     expanded, notes, unresolved = expand_avoid(avoid)
     no_hit = _no_hit(avoid)

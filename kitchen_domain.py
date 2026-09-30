@@ -343,9 +343,11 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
     # verified_by: 이 장면이 실제로 일어났는지 확인할 실행 스킬.
     mode = constraints.get("order_mode", "ask")
     by_msg = constraints.get("leave_source") == "message"
+    by_loc = constraints.get("leave_source") == "location"
     if pre:
         beats.append({
             "at": lv, "user": ("퇴근한다고 알리면 메시지가 온다" if by_msg
+                               else "회사를 나서면(위치) 메시지가 온다" if by_loc
                                else "퇴근길에 메시지를 받는다"),
             "system": "냉장고 재고·남은 시간·먹을 사람을 읽고 오늘 메뉴를 정해 알린다",
             # 메뉴를 집 밖에서 정하므로, 집에 와서 시간에 쫓기며 정할 일이 없다
