@@ -460,7 +460,15 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
 # 식사에 드는 시간(분). 세척은 **다 먹은 뒤**에 시작한다. 전에는 귀가 +45분
 # 고정이라, 식사까지 48분 걸린 가구에서 **밥이 되기도 전에** 세척기가 돌았다.
 # 20분은 가정이다(실측·통계를 확인하지 못했다).
-EAT_MIN = 20
+EAT_MIN = 30
+# (고쳐 온 과정: 근거 없이 20분 → 통계청 「2019년 생활시간조사」 보도의 한 끼
+#  식사 시간 범위 25분(평일 아침)~39분(토요일 저녁) 안의 값. **평일 저녁 값
+#  자체는 확인하지 못했다.** 가구가 prefs.eat_min 으로 바꿀 수 있고, 범위 양 끝에서
+#  결론이 바뀌는지는 assumption_sensitivity.py 가 잰다.)
+
+
+def _eat_min(constraints: dict) -> float:
+    return (constraints.get("prefs") or {}).get("eat_min", EAT_MIN)
 
 
 def _hhmm_plus(hhmm: str, minutes: float) -> str:
@@ -481,7 +489,7 @@ def retime_beats(scenario: dict, verify: dict, constraints: dict) -> list:
     spent = m["식사까지(분)"]
     cook_start = spent - (m.get("가열 시간(분)") or 0)
     real = {"cook": _hhmm_plus(t0, cook_start),
-            "wash": _hhmm_plus(t0, spent + EAT_MIN)}
+            "wash": _hhmm_plus(t0, spent + _eat_min(constraints))}
     changed = []
     for b in scenario.get("beats", []):
         k = b.get("timed")
@@ -1198,7 +1206,7 @@ def build_tasks(constraints: dict) -> list:
                 "soil_sigma": ctx.get("soil_sigma", 0.0),
                 # 다 먹은 뒤에 시작한다(귀가 + 식사까지 + 식사 시간)
                 "start_at": (_hhmm_plus(constraints["arrive_home"],
-                                        _meal_ready_min(ctx) + EAT_MIN)
+                                        _meal_ready_min(ctx) + _eat_min(constraints))
                              if constraints.get("arrive_home")
                              and _meal_ready_min(ctx) is not None
                              else constraints.get("cleanup_at")),

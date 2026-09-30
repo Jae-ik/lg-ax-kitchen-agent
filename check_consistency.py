@@ -151,6 +151,28 @@ def c5():
     return "\n".join(bad)
 
 
+@check("README 의 가정값 민감도 문장이 실제 실행과 같은가")
+def c5s():
+    """남은 약점 표(9/30)의 경계값 — 가정값이나 모델을 바꾸면 낡는다."""
+    import assumption_sensitivity as A
+    bad = []
+    eat = A.eat_rows()
+    for pid in {r["persona"] for r in eat}:
+        rs = [(r["quiet"], r["course"]) for r in eat if r["persona"] == pid]
+        if len(set(rs)) != 1:
+            bad.append(f"{pid}: 식사 25·30·39분에서 소음 판단·코스가 다르다 {rs}")
+    det = {(r["persona"], r["detour_min"]): r["verified"] for r in A.detour_rows()}
+    if not (det[("p4_퇴근길", 15)] and not det[("p4_퇴근길", 20)]):
+        bad.append("퇴근길 1인 들르기 경계가 15/20분이 아니다")
+    if not all(v for (pid, _), v in det.items() if pid != "p4_퇴근길"):
+        bad.append("세 가구가 들르기 10~25분 모두 성립하지 않는다")
+    dw = {(r["commute_min"], r["dwell_min"]): r["verified"] for r in A.dwell_rows()}
+    if not (dw[(30, 3)] and not dw[(30, 5)]
+            and all(dw[(c, d)] for c in (37, 40) for d in A.DWELL)):
+        bad.append(f"위치 확인 경계가 README 와 다르다 {dw}")
+    return "\n".join(bad)
+
+
 @check("README 의 주문 방식 표가 실제 실행과 같은가")
 def c5m():
     """주문 방식 × 퇴근 정보 표(9/30). 새 표를 넣으면 대조하는 줄도 함께

@@ -23,6 +23,8 @@
 from __future__ import annotations
 
 DWELL_MIN = 5                         # 나선 뒤 이만큼 안 돌아오면 퇴근으로 본다(가정)
+MIN_PROGRESS_KM = 0.3                 # 그동안 집까지 거리가 이만큼 줄어야 집 쪽이다(가정,
+                                      # 걷기 5km/h 로 5분이면 약 0.4km)
 DEFAULT_WINDOW = ("17:00", "23:59")   # 평소 퇴근 시간대(가정 — 가구가 바꿀 수 있다)
 
 
@@ -75,6 +77,21 @@ def detect_leave(events: list, *, consent: bool, commute_min: int | None,
             why.append(f"{e['at']} 회사 나섬 — {back[0]['at']} 에 다시 들어와 "
                        f"({dwell_min}분 안) 퇴근이 아니다")
             continue
+        # **집 쪽으로 움직이는가.** 퇴근 시간대에 회사를 나가 다른 곳(저녁
+        # 약속)으로 가는 날을 퇴근으로 보던 오탐을 줄인다. 휴대폰이 집까지
+        # 거리(kind="dist", km)를 보내면, 판단 시각까지의 거리가 줄었는지 본다.
+        d = sorted((x for x in events or [] if x.get("kind") == "dist"
+                    and t <= _m(x["at"]) <= t + dwell_min), key=lambda x: _m(x["at"]))
+        if len(d) >= 2:
+            gain = d[0]["km"] - d[-1]["km"]
+            if gain < MIN_PROGRESS_KM:
+                why.append(f"{e['at']} 회사 나섬 — {dwell_min}분 동안 집까지 "
+                           f"{d[0]['km']}→{d[-1]['km']}km 로 집 쪽이 아니라 퇴근이 아니다")
+                continue
+            why.append(f"{e['at']} 회사 나섬 — 집까지 {d[0]['km']}→{d[-1]['km']}km, 집 쪽이다")
+        else:
+            why.append(f"{e['at']} 회사 나섬 — 집까지 거리를 몰라 방향은 보지 못했다 "
+                       f"(시간대·머무름만 본다)")
         left = commute_min - dwell_min
         if left <= 0:
             why.append(f"{e['at']} 회사 나섬 — 집까지 {commute_min}분인데 확인에 "

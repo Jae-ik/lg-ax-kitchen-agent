@@ -104,6 +104,10 @@ class SituationReadSkill(Skill):
         else:
             ev.append(f"주문 방식 {mode} — 고객이 정해 둔 선호")
         constraints["order_mode"] = mode
+        # 가구가 정해 둔 도메인 설정(식사 시간 등). 설계 층은 읽지 않고 넘긴다.
+        constraints["prefs"] = dict(persona.get("prefs") or {})
+        if constraints["prefs"]:
+            ev.append(f"가구 설정 {sorted(constraints['prefs'])} — 기본값 대신 쓴다")
         if persona.get("auto_limit_krw") is not None:
             constraints["auto_limit_krw"] = persona["auto_limit_krw"]
 

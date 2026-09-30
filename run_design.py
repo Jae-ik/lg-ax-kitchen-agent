@@ -52,8 +52,11 @@ def build_design_tasks(ctx_seed: dict) -> list:
         Task(skill="situation_read", provides=("friction", "constraints"),
              bind=lambda c: {"persona": c["persona"], "stage_costs": STAGE_COSTS,
                              "terms": KITCHEN_TERMS,
-                             "self_min": {"on_way": _store.SHOP_DETOUR_MIN,
-                                          "from_home": _store.SHOP_TRIP_MIN}},
+                             "self_min": {
+                                 "on_way": (c["persona"].get("prefs") or {}).get(
+                                     "shop_detour_min", _store.SHOP_DETOUR_MIN),
+                                 "from_home": (c["persona"].get("prefs") or {}).get(
+                                     "shop_trip_min", _store.SHOP_TRIP_MIN)}},
              absorb=lambda c, o: c["seed"].update(
                  time_budget_min=o["constraints"].get("time_budget_min"),
                  # 조달이 계획에서 빠져도 주문 방식은 결과에 남긴다

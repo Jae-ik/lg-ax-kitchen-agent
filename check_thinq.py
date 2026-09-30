@@ -757,6 +757,60 @@ def p5_said_arrive():
                 f"말끼리 모순 → 집 밖 {cp['commute_min']}분")
 
 
+# ── 12 남은 약점 처리 (2026-09-30) ─────────────────────────────────────
+@check("애매한 시각은 지금 시각·앞뒤 조합으로 고르고, 모르면 애매했다고 남긴다")
+def q1_ambiguous():
+    f = lambda t, now=None: thinq.rule_understand(t, now=now)
+    a = f("12시 반에 퇴근하고 1시 10분 도착", "00:20")["fields"]
+    b = f("1시 도착", "00:40")["fields"]
+    c = f("1시 도착")
+    d = f("밤 1시 도착")["fields"]
+    ok = ((a.get("leave_office"), a.get("arrive_home")) == ("00:30", "01:10")
+          and b.get("arrive_home") == "01:00"
+          and c["fields"].get("arrive_home") == "13:00"
+          and any("애매" in w for w in c["read"])
+          and d.get("arrive_home") == "01:00")
+    return ok, (f"지금 00:20 → {a.get('leave_office')}·{a.get('arrive_home')} · "
+                f"지금 00:40 '1시' → {b.get('arrive_home')} · 지금 모름 → "
+                f"{c['fields'].get('arrive_home')}(애매 표시) · '밤 1시' → {d.get('arrive_home')}")
+
+
+@check("위치는 집 쪽으로 움직일 때만 퇴근으로 본다")
+def q2_direction():
+    import location as L
+    ex = {"at": "18:40", "kind": "exit", "place": "office"}
+    dist = lambda t, km: {"at": t, "kind": "dist", "km": km}
+    away, w1 = L.detect_leave([ex, dist("18:40", 5.0), dist("18:45", 5.1)],
+                              consent=True, commute_min=40)
+    home, _ = L.detect_leave([ex, dist("18:40", 5.0), dist("18:45", 4.5)],
+                             consent=True, commute_min=40)
+    unk, w3 = L.detect_leave([ex], consent=True, commute_min=40)
+    ok = (away is None and any("집 쪽이 아니라" in w for w in w1)
+          and home and home["leave_office"] == "18:45"
+          and unk and any("방향은 보지 못했다" in w for w in w3))
+    return ok, (f"멀어짐 {away} · 가까워짐 {home and home['leave_office']} · "
+                f"거리 모름 {unk and unk['leave_office']}(방향 못 봄 표시)")
+
+
+@check("근거 없는 가정값은 가구가 정하고, 그 값이 실행까지 닿는다")
+def q3_prefs():
+    import mode_sensitivity as ms   # noqa: F401  (personas 정리 방식 참고)
+    import assumption_sensitivity as A
+    e25 = A._design("p2_맞벌이", prefs={"eat_min": 25})
+    e39 = A._design("p2_맞벌이", prefs={"eat_min": 39})
+    w = lambda r: [b["at"] for b in r["scenario"]["beats"] if b["verified_by"] == "aftercare"][0]
+    s10 = A._design("p4_퇴근길", order_mode="self", prefs={"shop_detour_min": 10})
+    s20 = A._design("p4_퇴근길", order_mode="self", prefs={"shop_detour_min": 20})
+    u = thinq.understand("7시 도착", profile={"eat_min": 500, "shop_detour_min": 12})
+    ok = (w(e25) == "19:57" and w(e39) == "20:11"
+          and s10["verify"]["verified"] and not s20["verify"]["verified"]
+          and u["persona"].get("prefs") == {"shop_detour_min": 12}
+          and any("eat_min" in r for r in u["rejected"]))
+    return ok, (f"식사 25→39분: 세척 {w(e25)}→{w(e39)} · 들르기 10분 성립 "
+                f"{s10['verify']['verified']} / 20분 {s20['verify']['verified']} · "
+                f"eat_min 500 버림")
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

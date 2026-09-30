@@ -69,7 +69,8 @@ _HANGUL_NUM = {"한": 1, "하나": 1, "혼자": 1, "둘": 2, "두": 2, "셋": 3,
 _DEFAULT = {
     "id": "thinq", "label": "대화로 받은 상황", "household_size": 1,
     "arrive_home": "19:00", "time_budget_min": 45, "next_morning_rush": False,
-    "avoid": [], "dislike_noise_after": "23:00",
+    # 말하지 않았으면 층간소음 규칙의 야간 시작(22:00)을 쓴다 — 전에는 근거 없는 23:00
+    "avoid": [], "dislike_noise_after": "22:00",
     "goal_hint": "", "friction_reported": [], "fridge": [],
 }
 
@@ -183,20 +184,24 @@ def how() -> str:
 
 
 # ── 자연어 → 상황 ──────────────────────────────────────────────────────
-def _hour_of(h: int, before: str) -> int:
-    """'N시' 의 N 을 24시간으로. 바로 앞의 말(before)을 본다.
+def _hour_cands(h: int, before: str) -> list:
+    """'N시' 의 N 이 될 수 있는 24시간 값들. 첫째가 기본값이다.
 
-    저녁 에이전트라 말이 없으면 오후로 읽는다(3시 → 15시). 전에는 12 미만을
-    **무조건** 오후로 읽어 "새벽 1시 도착" 이 13:00, "아침 8시" 가 20:00,
-    "밤 12시 반" 이 12:30 이 됐다 — 야근 가구가 자정 넘어 말하는 시각이다.
+    바로 앞의 말(before)이 있으면 하나로 정해진다. 없으면 둘이다 — 저녁
+    에이전트라 오후를 먼저 둔다(3시 → [15, 3]). 전에는 12 미만을 **무조건**
+    오후로 읽어 "새벽 1시 도착" 이 13:00, "밤 12시 반" 이 12:30 이 됐다.
     """
     if h > 12:
-        return h
+        return [h]
     if any(k in before for k in ("새벽", "아침", "오전")):
-        return 0 if h == 12 else h
+        return [0 if h == 12 else h]
+    if any(k in before for k in ("오후", "저녁")):
+        return [h if h == 12 else h + 12]
     if h == 12 and any(k in before for k in ("밤", "자정")):
-        return 0
-    return h + 12 if h < 12 else h
+        return [0]
+    if "밤" in before:                  # 밤 11시 → 23시, 밤 1시 → 01시(자정 뒤)
+        return [h] if h <= 4 else [h + 12]
+    return [h + 12, h] if h < 12 else [12, 0]
 
 
 def rule_understand(text: str, now: str | None = None) -> dict:
@@ -209,17 +214,37 @@ def rule_understand(text: str, now: str | None = None) -> dict:
 
     # 시각: 뒤에 '퇴근' 이 오면 퇴근 시각, 아니면 귀가 시각이다.
     # ("6시 반에 퇴근" 을 귀가로 읽으면 이동 시간이 0 이 된다)
+    # 시각마다 **후보**를 둔다 — "1시" 는 13시일 수도 01시일 수도 있다.
+    # 고르는 순서: 앞의 말(새벽·밤) → 지금 시각에서 가까운 앞쪽 → 퇴근·귀가가
+    # 앞뒤로 맞는 조합 → 그래도 모르면 저녁으로 읽고 **애매했다고 남긴다.**
+    nowm = (int(now[:2]) * 60 + int(now[3:])) if now and _is_clock(now) else None
+    clocks = {}
     for m in re.finditer(r"(\d{1,2})\s*시\s*(반|(\d{1,2})\s*분)?", text):
         h = int(m.group(1))
         mi = 30 if m.group(2) == "반" else int(m.group(3) or 0)
-        h = _hour_of(h, text[max(0, m.start() - 4):m.start()])
-        hhmm = f"{h % 24:02d}:{mi:02d}"
-        if re.match(r"\s*(에|쯤|쯤에)?\s*퇴근", text[m.end():]):
-            got["leave_office"] = hhmm
-            why.append(f"'{m.group(0)} 퇴근' → 퇴근 {hhmm}")
-        elif "arrive_home" not in got:
-            got["arrive_home"] = hhmm
-            why.append(f"'{m.group(0)}' → 귀가 {hhmm}")
+        cands = [c * 60 + mi for c in _hour_cands(h, text[max(0, m.start() - 4):m.start()])]
+        if nowm is not None and len(cands) > 1:
+            cands.sort(key=lambda x: (x - (nowm - 60)) % 1440)
+        kind = ("leave_office" if re.match(r"\s*(에|쯤|쯤에)?\s*퇴근", text[m.end():])
+                else "arrive_home")
+        if kind not in clocks:
+            clocks[kind] = (m.group(0).strip(), cands)
+    pick = {k: v[1][0] for k, v in clocks.items()}
+    if len(clocks) == 2:
+        for lv_ in clocks["leave_office"][1]:
+            ar_ = next((a for a in clocks["arrive_home"][1]
+                        if 0 < (a - lv_) % 1440 <= 180 and a != lv_), None)
+            if ar_ is not None:
+                pick = {"leave_office": lv_, "arrive_home": ar_}
+                break
+    for k, (said_, cands) in clocks.items():
+        hhmm = f"{(pick[k] // 60) % 24:02d}:{pick[k] % 60:02d}"
+        got[k] = hhmm
+        label = "퇴근" if k == "leave_office" else "귀가"
+        why.append(f"'{said_}' → {label} {hhmm}"
+                   + ("" if len(cands) < 2 else
+                      " (지금 시각에 가까운 쪽)" if nowm is not None else
+                      f" (낮·밤이 애매해 {hhmm} 로 읽었다 — 틀리면 '새벽'·'밤' 을 붙여 달라)"))
 
     # "N분" 은 여럿이다 — 걸리는 시간(40분 걸려)·퇴근까지(30분 뒤 퇴근)는
     # 쓸 수 있는 시간이 아니다. 전에는 첫 "N분" 을 무조건 예산으로 읽었다.
@@ -345,7 +370,11 @@ def _friction_from(text: str) -> list:
 # 안전 항목(기피·나트륨)은 여기 두지 않는다 — 그것은 말할 때마다 승인을 거친다.
 PROFILE_KEYS = ("order_mode", "auto_limit_krw",
                 # 퇴근을 알아보는 데 쓰는 가구 사실·선호 (위치는 동의해야 쓴다)
-                "commute_min", "location_consent", "leave_window")
+                "commute_min", "location_consent", "leave_window",
+                "location_dwell_min",
+                # 근거를 못 찾은 가정값 — 가구가 정하면 그것을 쓴다(prefs 로 넘어간다)
+                "eat_min", "shop_detour_min", "shop_trip_min")
+PREF_KEYS = ("eat_min", "shop_detour_min", "shop_trip_min")
 
 
 def understand(text: str, ask=None, profile: dict | None = None,
@@ -374,6 +403,9 @@ def understand(text: str, ask=None, profile: dict | None = None,
                  for k in (profile or {}) if k not in PROFILE_KEYS]
     persona = {**_DEFAULT, **pref, **clean}
     _leave_from(persona, clean, location, got["read"])
+    prefs = {k: persona.pop(k) for k in PREF_KEYS if k in persona}
+    if prefs:
+        persona["prefs"] = prefs
     for k in PROFILE_KEYS:
         if k in clean and k in pref and clean[k] != pref[k]:
             got["read"].append(f"{k}: 정해 둔 {pref[k]} → 오늘은 {clean[k]}")
@@ -401,7 +433,8 @@ def _leave_from(persona: dict, said: dict, location, read: list) -> None:
         found, why = L.detect_leave(
             location, consent=bool(persona.get("location_consent")),
             commute_min=persona.get("commute_min"),
-            window=persona.get("leave_window"))
+            window=persona.get("leave_window"),
+            dwell_min=persona.get("location_dwell_min", L.DWELL_MIN))
         read.extend(f"위치: {w}" for w in why)
         if found and "arrive_home" in said:
             # **말한 귀가 시각이 위치 추정보다 확실하다.** 전에는 위치가 계산한
@@ -494,6 +527,10 @@ def _validate(fields: dict):
         "leave_office": (str, _is_clock),
         "commute_min": (int, lambda v: 1 <= v <= 180),
         "location_consent": (bool, lambda v: True),
+        "location_dwell_min": (int, lambda v: 0 <= v <= 30),
+        "eat_min": (int, lambda v: 5 <= v <= 120),
+        "shop_detour_min": (int, lambda v: 0 <= v <= 90),
+        "shop_trip_min": (int, lambda v: 0 <= v <= 120),
         "leave_window": (list, lambda v: len(v) == 2
                          and all(isinstance(x, str) and _is_clock(x) for x in v)),
         # 이름만 있으면 받되 **나머지는 우리가 채운다.** 사용자는

@@ -1,0 +1,324 @@
+{
+ "eat": [
+  {
+   "persona": "p1_야근",
+   "eat_min": 25,
+   "wash_at": "22:20",
+   "quiet": "이미 조용",
+   "course": "에코"
+  },
+  {
+   "persona": "p1_야근",
+   "eat_min": 30,
+   "wash_at": "22:24",
+   "quiet": "이미 조용",
+   "course": "에코"
+  },
+  {
+   "persona": "p1_야근",
+   "eat_min": 39,
+   "wash_at": "22:34",
+   "quiet": "이미 조용",
+   "course": "에코"
+  },
+  {
+   "persona": "p2_맞벌이",
+   "eat_min": 25,
+   "wash_at": "19:57",
+   "quiet": "조치 불필요",
+   "course": "표준"
+  },
+  {
+   "persona": "p2_맞벌이",
+   "eat_min": 30,
+   "wash_at": "20:02",
+   "quiet": "조치 불필요",
+   "course": "표준"
+  },
+  {
+   "persona": "p2_맞벌이",
+   "eat_min": 39,
+   "wash_at": "20:11",
+   "quiet": "조치 불필요",
+   "course": "표준"
+  },
+  {
+   "persona": "p3_알레르기",
+   "eat_min": 25,
+   "wash_at": "19:27",
+   "quiet": "조치 불필요",
+   "course": "강력(불림 포함)"
+  },
+  {
+   "persona": "p3_알레르기",
+   "eat_min": 30,
+   "wash_at": "19:32",
+   "quiet": "조치 불필요",
+   "course": "강력(불림 포함)"
+  },
+  {
+   "persona": "p3_알레르기",
+   "eat_min": 39,
+   "wash_at": "19:41",
+   "quiet": "조치 불필요",
+   "course": "강력(불림 포함)"
+  },
+  {
+   "persona": "p4_퇴근길",
+   "eat_min": 25,
+   "wash_at": "19:54",
+   "quiet": "조치 불필요",
+   "course": "에코"
+  },
+  {
+   "persona": "p4_퇴근길",
+   "eat_min": 30,
+   "wash_at": "20:00",
+   "quiet": "조치 불필요",
+   "course": "에코"
+  },
+  {
+   "persona": "p4_퇴근길",
+   "eat_min": 39,
+   "wash_at": "20:08",
+   "quiet": "조치 불필요",
+   "course": "에코"
+  }
+ ],
+ "detour": [
+  {
+   "persona": "p1_야근",
+   "detour_min": 10,
+   "meal_min": 14.5,
+   "budget_min": 25,
+   "verified": true,
+   "self_buy": null
+  },
+  {
+   "persona": "p1_야근",
+   "detour_min": 15,
+   "meal_min": 14.5,
+   "budget_min": 25,
+   "verified": true,
+   "self_buy": null
+  },
+  {
+   "persona": "p1_야근",
+   "detour_min": 20,
+   "meal_min": 14.5,
+   "budget_min": 25,
+   "verified": true,
+   "self_buy": null
+  },
+  {
+   "persona": "p1_야근",
+   "detour_min": 25,
+   "meal_min": 14.5,
+   "budget_min": 25,
+   "verified": true,
+   "self_buy": null
+  },
+  {
+   "persona": "p2_맞벌이",
+   "detour_min": 10,
+   "meal_min": 21.8,
+   "budget_min": 45,
+   "verified": true,
+   "self_buy": [
+    "두부"
+   ]
+  },
+  {
+   "persona": "p2_맞벌이",
+   "detour_min": 15,
+   "meal_min": 26.8,
+   "budget_min": 45,
+   "verified": true,
+   "self_buy": [
+    "두부"
+   ]
+  },
+  {
+   "persona": "p2_맞벌이",
+   "detour_min": 20,
+   "meal_min": 31.8,
+   "budget_min": 45,
+   "verified": true,
+   "self_buy": [
+    "두부"
+   ]
+  },
+  {
+   "persona": "p2_맞벌이",
+   "detour_min": 25,
+   "meal_min": 36.8,
+   "budget_min": 45,
+   "verified": true,
+   "self_buy": [
+    "두부"
+   ]
+  },
+  {
+   "persona": "p3_알레르기",
+   "detour_min": 10,
+   "meal_min": 42.2,
+   "budget_min": 60,
+   "verified": true,
+   "self_buy": [
+    "찹쌀",
+    "미나리"
+   ]
+  },
+  {
+   "persona": "p3_알레르기",
+   "detour_min": 15,
+   "meal_min": 47.2,
+   "budget_min": 60,
+   "verified": true,
+   "self_buy": [
+    "찹쌀",
+    "미나리"
+   ]
+  },
+  {
+   "persona": "p3_알레르기",
+   "detour_min": 20,
+   "meal_min": 52.2,
+   "budget_min": 60,
+   "verified": true,
+   "self_buy": [
+    "찹쌀",
+    "미나리"
+   ]
+  },
+  {
+   "persona": "p3_알레르기",
+   "detour_min": 25,
+   "meal_min": 57.2,
+   "budget_min": 60,
+   "verified": true,
+   "self_buy": [
+    "찹쌀",
+    "미나리"
+   ]
+  },
+  {
+   "persona": "p4_퇴근길",
+   "detour_min": 10,
+   "meal_min": 19.5,
+   "budget_min": 25,
+   "verified": true,
+   "self_buy": [
+    "두부",
+    "참기름"
+   ]
+  },
+  {
+   "persona": "p4_퇴근길",
+   "detour_min": 15,
+   "meal_min": 24.5,
+   "budget_min": 25,
+   "verified": true,
+   "self_buy": [
+    "두부",
+    "참기름"
+   ]
+  },
+  {
+   "persona": "p4_퇴근길",
+   "detour_min": 20,
+   "meal_min": 28.6,
+   "budget_min": 25,
+   "verified": false,
+   "self_buy": [
+    "두부",
+    "참기름"
+   ]
+  },
+  {
+   "persona": "p4_퇴근길",
+   "detour_min": 25,
+   "meal_min": 33.6,
+   "budget_min": 25,
+   "verified": false,
+   "self_buy": [
+    "두부",
+    "참기름"
+   ]
+  }
+ ],
+ "dwell": [
+  {
+   "commute_min": 30,
+   "dwell_min": 0,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 30,
+   "dwell_min": 3,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 30,
+   "dwell_min": 5,
+   "verified": false,
+   "meal_min": null
+  },
+  {
+   "commute_min": 30,
+   "dwell_min": 10,
+   "verified": false,
+   "meal_min": null
+  },
+  {
+   "commute_min": 37,
+   "dwell_min": 0,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 37,
+   "dwell_min": 3,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 37,
+   "dwell_min": 5,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 37,
+   "dwell_min": 10,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 40,
+   "dwell_min": 0,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 40,
+   "dwell_min": 3,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 40,
+   "dwell_min": 5,
+   "verified": true,
+   "meal_min": 9.5
+  },
+  {
+   "commute_min": 40,
+   "dwell_min": 10,
+   "verified": true,
+   "meal_min": 9.5
+  }
+ ]
+}
