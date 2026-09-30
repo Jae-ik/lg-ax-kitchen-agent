@@ -61,7 +61,7 @@ _MODE_CUES = (
     ("self", r"(내가|제가|직접)\s*[^.,]{0,8}?(사\s*갈|사\s*올|사서|살게|사갈|들를|들러)"
              r"|(장|마트)[은는을를]?\s*(내가|제가)"),
     ("ask", r"(물어보고|묻고|확인하고|확인받고)\s*[^.,]{0,4}?(사|시켜|주문)"
-            r"|(시키기|사기|주문하기)\s*전에\s*(물어|확인)"),
+            r"|(시키기|사기|주문하기)\s*전에\s*[^.,]{0,8}?(물어|확인)"),
     ("auto", r"알아서\s*[^.,]{0,4}?(시켜|주문|사|장)"),
 )
 _HANGUL_NUM = {"한": 1, "하나": 1, "혼자": 1, "둘": 2, "두": 2, "셋": 3,
@@ -255,7 +255,8 @@ def rule_understand(text: str) -> dict:
         mm = re.search(pat, text)
         # "알아서 사지 마" 는 자동 주문이 아니라 그 반대다. 부정이 붙으면
         # 그 방식으로 읽지 않는다(읽지 못하면 기본값 ask — 묻는 쪽).
-        if mm and re.match(r"[^.,]{0,3}?(지|진)\s*(마|말|않)", text[mm.end():]):
+        if mm and re.match(r"[^.,]{0,3}?(지|진)(는|도)?\s*(마|말|않)",
+                           text[mm.end():]):
             why.append(f"'{mm.group(0)}…' 에 부정이 붙어 주문 방식 {mode} 로 읽지 않음")
             continue
         if mm:
@@ -289,11 +290,20 @@ def _friction_from(text: str) -> list:
     return out
 
 
-def understand(text: str, ask=None) -> dict:
+# 가구가 **한 번 정해 두는 선호**. 그날 말이 이것을 덮는다.
+# 안전 항목(기피·나트륨)은 여기 두지 않는다 — 그것은 말할 때마다 승인을 거친다.
+PROFILE_KEYS = ("order_mode", "auto_limit_krw")
+
+
+def understand(text: str, ask=None, profile: dict | None = None) -> dict:
     """자연어를 상황 dict 로 바꾼다.
 
     ask 를 주면 그것으로 읽고, 안 주면 규칙으로 읽는다. **어느 쪽이든
     결과는 검사를 거친다** — LLM 이 준 값을 그대로 쓰지 않는다.
+
+    profile: 가구가 정해 둔 선호(PROFILE_KEYS). 기본값 < 선호 < 그날 말 순서로
+    덮는다. 전에는 선호를 받는 곳이 없어 "한 번 정해 두고 그날 말로 바꾼다" 가
+    README 에만 있었다 — 그날 말이 없으면 늘 기본값(ask)이었다.
     """
     if ask is None:
         got = rule_understand(text)
@@ -303,7 +313,17 @@ def understand(text: str, ask=None) -> dict:
         got = {"fields": fields, "read": why, "by": "LLM"}
 
     clean, rejected = _validate(got["fields"])
-    persona = {**_DEFAULT, **clean}
+    pref, pref_bad = _validate({k: v for k, v in (profile or {}).items()
+                                if k in PROFILE_KEYS})
+    rejected += [f"선호 {b}" for b in pref_bad]
+    rejected += [f"선호 {k}: 가구 선호로 두지 않는 항목이라 버렸다"
+                 for k in (profile or {}) if k not in PROFILE_KEYS]
+    persona = {**_DEFAULT, **pref, **clean}
+    for k in PROFILE_KEYS:
+        if k in clean and k in pref and clean[k] != pref[k]:
+            got["read"].append(f"{k}: 정해 둔 {pref[k]} → 오늘은 {clean[k]}")
+        elif k in pref and k not in clean:
+            got["read"].append(f"{k}: 정해 둔 선호 {pref[k]} 를 쓴다")
     confirm = [k for k in NEEDS_CONFIRM if k in clean]
     return {"persona": persona, "read": got["read"], "by": got["by"],
             "rejected": rejected, "needs_confirm": confirm}
@@ -341,6 +361,8 @@ def _validate(fields: dict):
         "friction_reported": (list, lambda v: all(isinstance(x, str) for x in v)),
         # 오늘의 주문 방식. 세 값 밖이면 버린다 — 버리면 기본값(ask, 묻기)이다.
         "order_mode": (str, lambda v: v in ("auto", "ask", "self")),
+        # 자동 주문 1회 상한(원). 0 이면 사실상 자동 주문을 끈다.
+        "auto_limit_krw": (int, lambda v: 0 <= v <= 200000),
         # 이름만 있으면 받되 **나머지는 우리가 채운다.** 사용자는
         # "배추 있어" 라고만 말하고 보관일을 말하지 않는다. LLM 도
         # 그렇게 준다 — 실제로 stored_days 가 빠진 항목이 와서
@@ -526,7 +548,8 @@ def _invented_numbers(text: str, metrics: dict) -> list:
 
 
 # ── 전체 ───────────────────────────────────────────────────────────────
-def run(text: str, ask=None, seed: int = 7, approve=None) -> dict:
+def run(text: str, ask=None, seed: int = 7, approve=None,
+        profile: dict | None = None) -> dict:
     """자연어 한 줄에서 실행 결과와 설명까지.
 
     **안전 항목(기피·나트륨)을 읽었으면 승인 없이 실행하지 않는다.**
@@ -544,7 +567,7 @@ def run(text: str, ask=None, seed: int = 7, approve=None) -> dict:
     from orchestrator import Trace
     from recipe_parse import expand_avoid
 
-    u = understand(text, ask=ask)
+    u = understand(text, ask=ask, profile=profile)
     avoid = u["persona"].get("avoid", [])
     expanded, notes, unresolved = expand_avoid(avoid)
     no_hit = _no_hit(avoid)

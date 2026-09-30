@@ -398,7 +398,8 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
         ask_all = mode == "ask"
         beats.append({
             "at": plus(lv, 2),
-            "user": "메시지로 한 번에 승인한다" if ask_all else "메시지로 승인만 한다",
+            "user": ("메시지 한 통에서 품목마다 승인한다" if ask_all
+                     else "메시지로 승인만 한다"),
             # 설계 시점에는 자동 주문이 될지 확인이 필요할지 모른다 —
             # 판단 기준을 말하고 결과는 열어 둔다.
             "system": ("냉장고와 양념 선반을 함께 보고 부족한 것을 모아 한 번에 묻고, "
@@ -1312,11 +1313,13 @@ def make_executor(registry, on_step=None, seed_ctx=None):
         if ctx.get("approved_after_ask"):
             metrics["확인 후 승인"] = ctx["approved_after_ask"]
         # 조건부 판단은 결과가 없어도 남긴다(2026-09-25) — 어느 방식으로 샀는지
-        if ctx.get("order_mode"):
-            metrics["주문 방식"] = {"auto": "자동(되는 것은 주문)",
-                                "ask": "매번 확인",
-                                "self": "직접 장보기"}.get(ctx["order_mode"],
-                                                          ctx["order_mode"])
+        _mode = ctx.get("order_mode") or ctx.get("planned_order_mode")
+        if _mode:
+            metrics["주문 방식"] = ({"auto": "자동(되는 것은 주문)",
+                                 "ask": "매번 확인",
+                                 "self": "직접 장보기"}.get(_mode, _mode)
+                                + ("" if ctx.get("order_mode") else
+                                   " — 조달 단계가 없어 쓰이지 않았다"))
         if ctx.get("self_buy"):
             metrics["직접 살 것"] = ctx["self_buy"]
         if ctx.get("overshoot") is not None:

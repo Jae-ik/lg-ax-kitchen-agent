@@ -477,6 +477,11 @@ def m1():
              "알아서 시키지 말고 내가 사 갈게": "self",
              # 부정 — 자동으로 읽으면 안 된다
              "알아서 사지 마": None, "알아서 주문하지 마": None,
+             # 조사가 낀 부정·사이에 말이 낀 확인 — 진짜 LLM 은 ask 로 읽었는데
+             # 규칙은 auto(반대)로 읽었다(2026-09-30)
+             "알아서 주문하지는 마": None,
+             "알아서 사지는 말고 사기 전에 나한테 물어봐": "ask",
+             "사기 전에 꼭 나한테 확인해": "ask",
              # 말하지 않았으면 비워 둔다(설계가 ask 로 채운다)
              "7시 도착, 두부 있어": None}
     bad = {t: (thinq.rule_understand(t)["fields"].get("order_mode"), want)
@@ -556,6 +561,25 @@ def m5():
           and abs(s["meal_min"] - a["meal_min"] - store.SHOP_DETOUR_MIN) < 0.05)
     return ok, (f"auto {a['meal_min']}분 · self {s['meal_min']}분 "
                 f"(+{store.SHOP_DETOUR_MIN}분 가정) · 직접 {s['self_buy']}")
+
+
+@check("정해 둔 선호를 쓰고, 그날 말이 있으면 그날 말이 이긴다")
+def m6():
+    """기본값 < 가구 선호 < 그날 말. 선호에 안전 항목(avoid)을 넣어도
+    받지 않는다 — 그것은 말할 때마다 승인을 거친다."""
+    u0 = thinq.understand("7시 도착")
+    u1 = thinq.understand("7시 도착", profile={"order_mode": "auto"})
+    u2 = thinq.understand("7시 도착, 오늘은 내가 마트 들를게",
+                          profile={"order_mode": "auto"})
+    u3 = thinq.understand("7시 도착", profile={"order_mode": "가끔",
+                                               "avoid": ["새우"]})
+    got = (u0["persona"].get("order_mode"), u1["persona"].get("order_mode"),
+           u2["persona"].get("order_mode"), u3["persona"].get("order_mode"))
+    ok = (got == (None, "auto", "self", None)
+          and u3["persona"]["avoid"] == [] and len(u3["rejected"]) == 2
+          and any("오늘은 self" in r for r in u2["read"]))
+    return ok, (f"없음 {got[0]} · 선호 {got[1]} · 선호+그날 말 {got[2]} · "
+                f"잘못된 선호 {got[3]} (버림 {len(u3['rejected'])}건)")
 
 
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")

@@ -259,7 +259,8 @@ def c7():
         R |= set(RD_PAT.findall(ASSIGN.sub("", ln)))   # 대입 좌변은 빼고 센다
         R |= set(GET_PAT.findall(ln))
 
-    seeded = {"pantry_refill", "time_budget_min", "touches"}
+    seeded = {"pantry_refill", "time_budget_min", "touches",
+              "planned_order_mode"}   # run_design 이 situation_read 뒤에 채운다
     bad = []
     orphan = sorted(k for k in W if k not in R)
     if orphan:

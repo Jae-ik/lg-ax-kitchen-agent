@@ -55,7 +55,9 @@ def build_design_tasks(ctx_seed: dict) -> list:
                              "self_min": {"on_way": _store.SHOP_DETOUR_MIN,
                                           "from_home": _store.SHOP_TRIP_MIN}},
              absorb=lambda c, o: c["seed"].update(
-                 time_budget_min=o["constraints"].get("time_budget_min")
+                 time_budget_min=o["constraints"].get("time_budget_min"),
+                 # 조달이 계획에서 빠져도 주문 방식은 결과에 남긴다
+                 planned_order_mode=o["constraints"].get("order_mode")
              ) or c.update(friction=o["friction"],
                                           constraints=o["constraints"]),
              note="상황을 읽어야 무엇을 없앨지 정해진다"),
