@@ -35,6 +35,8 @@ import time
 REGEN = [
     ("run_design.py", "4상황을 실행해 scenarios.json·trace_design.json 을 만든다"),
     ("measure_variance.py", "시드를 바꿔 200회씩 돌려 variance.json 을 만든다"),
+    # README 의 '믿는 재고가 틀리면' 표를 check_consistency 가 이 파일로 대조한다
+    ("belief_gap.py", "믿는 재고와 실제가 다를 때를 재 belief_gap.json 을 만든다"),
 ]
 
 # (스크립트, 무엇을 지키는가, **깨졌을 때 무엇부터 보는가**)

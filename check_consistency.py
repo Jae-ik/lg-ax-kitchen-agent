@@ -151,6 +151,29 @@ def c5():
     return "\n".join(bad)
 
 
+@check("README 의 '믿는 재고가 틀리면' 표가 실제 실행과 같은가")
+def c5g():
+    import json
+    import os
+    if not os.path.exists("belief_gap.json"):
+        return "belief_gap.json 이 없다 — belief_gap.py 를 먼저 돌려야 한다"
+    rows = json.load(open("belief_gap.json", encoding="utf-8"))
+    labels = {"p1_야근": "야근 1인", "p2_맞벌이": "맞벌이 2인",
+              "p3_알레르기": "알레르기 4인", "p4_퇴근길": "퇴근길 1인"}
+    doc = io.open("README.md", encoding="utf-8").read().splitlines()
+    bad = []
+    for pid, lab in labels.items():
+        line = next((l for l in doc if l.startswith(f"| {lab} (")), None)
+        if line is None:
+            bad.append(f"README 에 '{lab} (' 줄이 없다")
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")][1:]
+        got = [r["label"] for r in rows if r["persona"] == pid]
+        if cells != got:
+            bad.append(f"{lab}: 실행 {got} 인데 README {cells}")
+    return "\n".join(bad)
+
+
 @check("README 의 가정값 민감도 문장이 실제 실행과 같은가")
 def c5s():
     """남은 약점 표(9/30)의 경계값 — 가정값이나 모델을 바꾸면 낡는다."""

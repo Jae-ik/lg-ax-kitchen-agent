@@ -1,0 +1,186 @@
+[
+ {
+  "persona": "p1_야근",
+  "item": "배추",
+  "error": "E1 있다고 믿는데 없음",
+  "outcome": "계량 때(귀가 9분 뒤) 발견 → 집에서 다시 짬 → 만들 것이 없다 — 저녁 실패",
+  "label": "저녁 실패",
+  "verified": false,
+  "stale_used": [],
+  "meal_min": null,
+  "base_meal_min": 14.5
+ },
+ {
+  "persona": "p1_야근",
+  "item": "배추",
+  "error": "E2 없다고 믿는데 있음",
+  "outcome": "메뉴를 못 정함 · 재계획해도 실패",
+  "label": "메뉴 못 정함",
+  "verified": false,
+  "stale_used": [],
+  "meal_min": null,
+  "base_meal_min": 14.5
+ },
+ {
+  "persona": "p1_야근",
+  "item": "배추",
+  "error": "E3 양이 모자람",
+  "outcome": "계량 때(귀가 9분 뒤) 발견 → 집에서 다시 짬 → 만들 것이 없다 — 저녁 실패",
+  "label": "저녁 실패",
+  "verified": false,
+  "stale_used": [],
+  "meal_min": null,
+  "base_meal_min": 14.5
+ },
+ {
+  "persona": "p1_야근",
+  "item": "배추",
+  "error": "E4 보관일 틀림",
+  "outcome": "**상한 재료 사용** (배추) — 아무도 모름",
+  "label": "상한 재료 사용",
+  "verified": true,
+  "stale_used": [
+   "배추"
+  ],
+  "meal_min": 14.5,
+  "base_meal_min": 14.5
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "배추",
+  "error": "E1 있다고 믿는데 없음",
+  "outcome": "계량 때(귀가 4분 뒤) 발견 → 집에서 다시 짬 → 예산 초과 46.5/45분",
+  "label": "예산 초과",
+  "verified": false,
+  "stale_used": [],
+  "meal_min": 46.5,
+  "base_meal_min": 11.8
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "배추",
+  "error": "E2 없다고 믿는데 있음",
+  "outcome": "성립 · 주문 추가 ['배추'] · 식사까지 11.8→11.7분 · 덜 담김 두부 1g",
+  "label": "불필요 주문",
+  "verified": true,
+  "stale_used": [],
+  "meal_min": 11.7,
+  "base_meal_min": 11.8
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "배추",
+  "error": "E3 양이 모자람",
+  "outcome": "계량 때(귀가 4분 뒤) 발견 → 집에서 다시 짬 → 예산 초과 46.8/45분",
+  "label": "예산 초과",
+  "verified": false,
+  "stale_used": [],
+  "meal_min": 46.8,
+  "base_meal_min": 11.8
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "배추",
+  "error": "E4 보관일 틀림",
+  "outcome": "**상한 재료 사용** (배추) — 아무도 모름",
+  "label": "상한 재료 사용",
+  "verified": true,
+  "stale_used": [
+   "배추"
+  ],
+  "meal_min": 11.8,
+  "base_meal_min": 11.8
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "닭고기",
+  "error": "E1 있다고 믿는데 없음",
+  "outcome": "계량 때(귀가 4분 뒤) 발견 → 집에서 다시 짬 → 된장찌개 · 식사까지 32.2→52.1분 · 주문 ['배추', '된장', '두부']",
+  "label": "집에서 다시 짜 52.1분",
+  "verified": true,
+  "stale_used": [],
+  "meal_min": 52.1,
+  "base_meal_min": 32.2
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "닭고기",
+  "error": "E2 없다고 믿는데 있음",
+  "outcome": "성립 · 주문 추가 ['배추', '된장', '두부'] · 실제로 있던 닭고기 은 안 씀 · 메뉴 변경 호박잎 삼계탕→된장찌개 · 식사까지 32.2→16.1분 · 덜 담김 두부 3g",
+  "label": "불필요 주문",
+  "verified": true,
+  "stale_used": [],
+  "meal_min": 16.1,
+  "base_meal_min": 32.2
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "닭고기",
+  "error": "E3 양이 모자람",
+  "outcome": "계량 때(귀가 4분 뒤) 발견 → 집에서 다시 짬 → 된장찌개 · 식사까지 32.2→52.1분 · 주문 ['배추', '된장', '두부']",
+  "label": "집에서 다시 짜 52.1분",
+  "verified": true,
+  "stale_used": [],
+  "meal_min": 52.1,
+  "base_meal_min": 32.2
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "닭고기",
+  "error": "E4 보관일 틀림",
+  "outcome": "**상한 재료 사용** (닭고기) — 아무도 모름",
+  "label": "상한 재료 사용",
+  "verified": true,
+  "stale_used": [
+   "닭고기"
+  ],
+  "meal_min": 32.2,
+  "base_meal_min": 32.2
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "배추",
+  "error": "E1 있다고 믿는데 없음",
+  "outcome": "계량 때(귀가 4분 뒤) 발견 → 집에서 다시 짬 → 만들 것이 없다 — 저녁 실패",
+  "label": "저녁 실패",
+  "verified": false,
+  "stale_used": [],
+  "meal_min": null,
+  "base_meal_min": 9.5
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "배추",
+  "error": "E2 없다고 믿는데 있음",
+  "outcome": "성립 · 주문 추가 ['배추'] · 덜 담김 두부 1g",
+  "label": "불필요 주문",
+  "verified": true,
+  "stale_used": [],
+  "meal_min": 9.5,
+  "base_meal_min": 9.5
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "배추",
+  "error": "E3 양이 모자람",
+  "outcome": "계량 때(귀가 4분 뒤) 발견 → 집에서 다시 짬 → 만들 것이 없다 — 저녁 실패",
+  "label": "저녁 실패",
+  "verified": false,
+  "stale_used": [],
+  "meal_min": null,
+  "base_meal_min": 9.5
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "배추",
+  "error": "E4 보관일 틀림",
+  "outcome": "**상한 재료 사용** (배추) — 아무도 모름",
+  "label": "상한 재료 사용",
+  "verified": true,
+  "stale_used": [
+   "배추"
+  ],
+  "meal_min": 9.5,
+  "base_meal_min": 9.5
+ }
+]
