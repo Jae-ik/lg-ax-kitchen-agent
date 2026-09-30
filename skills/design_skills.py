@@ -19,6 +19,19 @@ from typing import Callable
 from .base import Skill, SkillResult
 
 
+def friction_hit(f: dict, removes) -> bool:
+    """장면의 removes 문장(들)이 이 수고를 덮는가.
+
+    고객 문장 그대로이거나, 같은 일로 표시된 상황 추론 문장(same_as)이
+    들어 있으면 덮은 것이다. (여전히 글자 포함이다 — 뜻으로 짝짓는 것은
+    LLM 장면 제안이 한다. 여기서는 같은 수고를 두 번 세지 않는 것만 본다.)
+    """
+    if isinstance(removes, str):
+        removes = [removes]
+    names = [f["what"]] + ([f["same_as"]] if f.get("same_as") else [])
+    return any(n in r for n in names for r in removes)
+
+
 # ════════════════════ 01 고객 상황 이해 ════════════════════
 class SituationReadSkill(Skill):
     name = "situation_read"
@@ -42,6 +55,9 @@ class SituationReadSkill(Skill):
                      # 상황에서 읽히는 수고의 이름도 도메인이 안다
                      "short_time": "시간이 모자란 상태에서 무엇을 할지 정하는 일",
                      "avoid_check": "항목마다 피해야 할 것이 섞였는지 확인하는 일",
+                     # 고객이 이미 자기 말로 한 불편인지 알아보는 단서.
+                     # 중립 도메인은 단서가 없어 합치지 않는다.
+                     "short_time_cues": (), "avoid_check_cues": (),
                      "finish_start": "마무리 시작"}
 
     def run(self, persona: dict, stage_costs: dict, terms: dict | None = None,
@@ -119,15 +135,29 @@ class SituationReadSkill(Skill):
             t = h * 60 + m + 45          # 일을 마친 뒤 마무리 기기를 돌린다
             constraints["cleanup_at"] = f"{(t // 60) % 24:02d}:{t % 60:02d}"
 
-        # 수고 지점: 고객이 말한 것 + 상황에서 읽히는 것
+        # 수고 지점: 고객이 말한 것 + 상황에서 읽히는 것.
+        # 상황에서 읽은 수고를 **고객이 이미 자기 말로 했으면 새로 더하지
+        # 않는다** — 고객 문장에 same_as 로 표시해 한 번만 센다. 전에는 p3 의
+        # "재료마다 알레르기 여부를 확인하는 일"(고객)과 "재료마다 못 먹는 것이
+        # 섞였는지 확인하는 일"(추론)이 따로 세어져, 같은 일이 한쪽은 덮이고
+        # 한쪽은 안 덮여 "수고 4건 중 2건" 이 됐다(실제 3건 중 2건).
         for f in persona.get("friction_reported", []):
             friction.append({"what": f, "source": "고객 진술"})
+
+        def infer(key, source):
+            said = [f for f in friction if f["source"] == "고객 진술"
+                    and any(c in f["what"] for c in T.get(key + "_cues", ()))]
+            if said:
+                said[0]["same_as"] = T[key]
+                ev.append(f"상황 추론 '{T[key]}' 은 고객이 이미 말했다 — "
+                          f"'{said[0]['what']}' 로 한 번만 센다")
+            else:
+                friction.append({"what": T[key], "source": source})
+
         if budget < need_min:
-            friction.append({"what": T["short_time"],
-                             "source": "상황 추론(시간 예산)"})
+            infer("short_time", "상황 추론(시간 예산)")
         if avoid:
-            friction.append({"what": T["avoid_check"],
-                             "source": "상황 추론(알레르기)"})
+            infer("avoid_check", "상황 추론(알레르기)")
 
         ev.append(f"수고 지점 {len(friction)}건 확정")
         # 덜어낼 수고가 하나도 없으면 이 에이전트를 부를 이유가 없다. 제약은
@@ -193,10 +223,10 @@ class ScenarioDraftSkill(Skill):
 
         removed = {b["removes"] for b in beats}
         for f in friction:
-            hit = any(f["what"] in r for r in removed)
+            hit = friction_hit(f, removed)
             ev.append(f"{'해소' if hit else '미해소'} — {f['what']}")
 
-        covered = sum(1 for f in friction if any(f["what"] in r for r in removed))
+        covered = sum(1 for f in friction if friction_hit(f, removed))
         ev.append(f"수고 {len(friction)}건 중 {covered}건을 시나리오가 덮는다")
 
         # 덜어낼 수고가 없으면 시나리오를 만들 이유도 없다. 예전에는 이 경우에도

@@ -306,7 +306,10 @@ MUST_USE_DAYS = 1       # 남은 날이 이 이하면 오늘 안 쓰면 버린�
 KITCHEN_TERMS = {"amount": "조리량", "finish": "세척",
                  "finish_course": "세척 코스",
                  "short_time": "시간이 모자란 상태에서 메뉴를 정하는 일",
-                 "avoid_check": "재료마다 못 먹는 것이 섞였는지 확인하는 일"}
+                 "avoid_check": "재료마다 못 먹는 것이 섞였는지 확인하는 일",
+                 # 고객이 같은 불편을 자기 말로 했는지 알아보는 단서
+                 "short_time_cues": ("시간이 모자", "시간이 없", "뭘 먹을지"),
+                 "avoid_check_cues": ("알레르기", "못 먹", "먹으면 안 되")}
 
 
 def kitchen_beats(persona: dict, constraints: dict, plus) -> list:

@@ -846,7 +846,7 @@
     }
    ],
    "covered": 2,
-   "total_friction": 4,
+   "total_friction": 3,
    "retimed": [
     "converge: 18:35 → 18:34",
     "aftercare: 19:15 → 19:22"

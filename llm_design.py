@@ -32,6 +32,7 @@
   반복 측정과 회귀 검사가 그 위에서 그대로 돈다.
 """
 from __future__ import annotations
+from skills.design_skills import friction_hit
 import json
 import re
 
@@ -251,10 +252,10 @@ def make_llm_beats(ask, capabilities, fallback, friction_of,
         # LLM 이 덮지 못한 수고 중 **틀이 덮는 것**은 틀 장면으로 채운다.
         # 알레르기 확인 장면이 여기서 빠지지 않는다 — LLM 이 잊어도 남는다.
         covered = {f["what"] for f in friction
-                   if any(f["what"] in b["removes"] for b in beats)}
+                   if friction_hit(f, [b["removes"] for b in beats])}
         for b in base:
             gets = [f["what"] for f in friction
-                    if f["what"] not in covered and f["what"] in b["removes"]]
+                    if f["what"] not in covered and friction_hit(f, b["removes"])]
             if gets:
                 beats.append(dict(b, source="틀"))
                 covered.update(gets)

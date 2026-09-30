@@ -362,8 +362,9 @@ def d7():
 @check("진짜 LLM 이 p3 에 준 답을 재생하면 같은 결과가 나온다")
 def d8():
     """2026-09-28 에 claude CLI 가 준 원문(fixtures). 키 없이 재생한다.
-    틀은 p3 수고를 1/4 덮었고, 이 제안은 3/4 를 덮고 남은 하나(조리 기구
-    분리)는 '덜어 줄 기능이 없다' 고 스스로 밝혔다."""
+    이 제안은 p3 수고 3건 중 2건을 덮고 남은 하나(조리 기구 분리)는 '덜어 줄
+    기능이 없다' 고 스스로 밝혔다. (전에는 3/4 였다 — 같은 알레르기 확인이 고객
+    문장과 상황 추론으로 두 번 세어졌다. 2026-09-30 에 합쳤다.)"""
     import pathlib
     raw = json.loads(pathlib.Path("fixtures/llm_p3_scenes.json")
                      .read_text(encoding="utf-8"))["raw"]
@@ -371,8 +372,9 @@ def d8():
     s1, v1 = r1["scenario"], r1["verify"]
     same = ([b["at"] + b["system"] for b in s1["beats"]]
             == [b["at"] + b["system"] for b in r2["scenario"]["beats"]])
-    ok = (same and s1["covered"] == 3 and s1["total_friction"] == 4
-          and v1["verified"] and r1["design_report"]["uncovered"])
+    ok = (same and s1["covered"] == 2 and s1["total_friction"] == 3
+          and v1["verified"] and r1["design_report"]["uncovered"]
+          and not r1["design_report"]["rejected"])   # 번호가 밀려 버려지지 않는다
     return ok, (f"덮음 {s1['covered']}/{s1['total_friction']} · 장면 "
                 f"{v1['beats_met']}/{v1['beats_total']} · 두 번 같음 {same} · "
                 f"못 덮는다고 밝힘 {len(r1['design_report']['uncovered'])}건")
