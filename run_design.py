@@ -213,7 +213,9 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
 
     print()
     print("  ── 시나리오 ──")
-    for b in sorted(sc["beats"], key=lambda b: b["at"]):
+    from skills.design_skills import night_order
+    for b in sorted(sc["beats"], key=night_order(sc.get("arrive_home")
+                                                  or ctx["persona"].get("arrive_home"))):
         print(f"   {b['at']}  사용자: {b['user']}")
         print(f"          가전: {b['system']}")
         print(f"          사라진 수고: {b['removes']}")

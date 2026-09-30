@@ -796,7 +796,9 @@ def build_tasks(constraints: dict) -> list:
                 "known_items": KNOWN_ITEMS, "avoid": avoid,
                 "auto_limit_krw": constraints.get("auto_limit_krw", AUTO_LIMIT_KRW),
                 "deadline_min": constraints.get("budget_min"),
-                "mode": constraints.get("order_mode")}
+                "mode": constraints.get("order_mode"),
+                # 메뉴와 같은 규칙으로 기피어를 본다(얇게→게 같은 오탐 제외)
+                "match": contains_any}
 
     def _procure_absorb(ctx, out):
         def qty_for(name):
@@ -852,6 +854,12 @@ def build_tasks(constraints: dict) -> list:
         pre = constraints.get("preorder")
         for c in out["need_confirm"]:
             name = c["name"]
+            # 못 먹는 재료로 멈춘 것은 **승인을 가정하지 않는다.** 시연은
+            # 확인 요청에 동의했다고 보고 진행하는데, 그 가정이 알레르기
+            # 품목까지 재고에 넣고 있었다(사유를 보지 않았다).
+            if c.get("safety"):
+                late.append(f"{name}(못 먹는 재료 — 승인을 가정하지 않는다)")
+                continue
             if name not in CATALOG:
                 continue
             a_eta = store.min_delivery_min(item=name)

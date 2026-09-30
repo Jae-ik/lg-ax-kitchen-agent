@@ -659,6 +659,104 @@ def n4():
     return ok, " · ".join(f"{k} {'성립' if v[0] else '실패'}" for k, v in got.items())
 
 
+# ── 11 세부 점검에서 나온 것 (2026-09-30) ──────────────────────────────
+@check("조달의 기피 필터는 포함 일치다 — 새우 가구에 새우젓·꽃게를 사지 않는다")
+def p1_avoid():
+    from skills import REGISTRY
+    from recipe_parse import contains_any, expand_avoid
+
+    def lk(n):
+        return [{"item": n, "store": "즉시", "price_krw": 3000,
+                 "delivery_min": 27, "can_order": True}]
+    proc = REGISTRY.get("procure")
+    bad = []
+    for mode in ("auto", "ask", "self"):
+        for match in (None, contains_any):          # 기본값 · 파이프라인이 주는 것
+            r = proc.run(missing=["새우젓", "꽃게", "두부"], lookup=lk,
+                         known_items=["새우젓", "꽃게", "두부"],
+                         avoid=expand_avoid(["갑각류"])[0], mode=mode,
+                         deadline_min=40, match=match).output
+            bought = ([a["name"] for a in r["auto_ordered"]]
+                      + [x["name"] for x in r["self_buy"]])
+            flagged = [c["name"] for c in r["need_confirm"] if c.get("safety")]
+            if set(bought) & {"새우젓", "꽃게"} or set(flagged) != {"새우젓", "꽃게"}:
+                bad.append((mode, bool(match), bought, flagged))
+    return not bad, "방식 3 × 비교 2 모두 새우젓·꽃게를 안전 보류" if not bad else str(bad)
+
+
+@check("시연의 '승인했다고 가정' 이 못 먹는 재료까지 승인하지 않는다")
+def p2_safety_approve():
+    import kitchen_domain as KD
+    import kitchen as K
+    K.reset([{"name": "배추", "qty_g": 300, "stored_days": 1, "shelf_life_days": 7}])
+    tasks = KD.build_tasks({"avoid": ["새우"], "budget_min": 60, "preorder": False})
+    proc = next(t for t in tasks if t.skill == "procure")
+    ctx = {"record": {"ingredients": [{"name": "새우젓", "qty_g": 20},
+                                      {"name": "두부", "qty_g": 150}]}}
+    out = {"auto_ordered": [], "self_buy": [], "total_krw": 0, "arrive_in_min": 0,
+           "mode": "ask",
+           "need_confirm": [{"name": "새우젓", "reason": "알레르기·기피 목록에 있음",
+                             "safety": True},
+                            {"name": "두부", "reason": "처음 구매하는 품목"}]}
+    proc.absorb(ctx, out)
+    ok = ("새우젓" not in ctx["approved_after_ask"] and "두부" in ctx["approved_after_ask"]
+          and K.fridge_check("새우젓") is None
+          and any("새우젓" in x for x in ctx["late_after_ask"]))
+    return ok, f"승인 {ctx['approved_after_ask']} · 보류 {ctx['late_after_ask']}"
+
+
+@check("자정을 넘겨도 장면이 시간 순이고, 조용 시간에 도는 세척을 알아본다")
+def p3_midnight():
+    from skills import REGISTRY
+    o = thinq.run("지금 퇴근해, 40분 걸려. 25분 안에 먹고 싶어. 배추 두부 된장 "
+                  "애호박 있어", now="23:50", profile={"order_mode": "auto"})
+    order = [b["at"] for b in o["result"]["scenario"]["beats"]]
+    a = REGISTRY.get("aftercare")
+    late = a.run(soil_score=0.3, profile="dishwasher", start_at="00:55",
+                 quiet_after="23:00").output["quiet_note"]
+    noon = a.run(soil_score=0.3, profile="dishwasher", start_at="11:00",
+                 quiet_after="23:00").output["quiet_note"]
+    ok = (order[0] == "23:50" and order[-1].startswith("00:")
+          and "이후" in late and "전에 끝난다" in noon)
+    return ok, f"장면 {order} · 00:55 시작 → '{late[:22]}…' · 11:00 → '{noon[:14]}…'"
+
+
+@check("자정 근처 시각을 바로 읽는다 — 새벽·밤 12시·자정 걸친 퇴근 시간대")
+def p4_night_clock():
+    import location as L
+    cases = {"새벽 1시 도착": "01:00", "밤 12시 반 도착": "00:30",
+             "아침 8시 도착": "08:00", "오후 3시 도착": "15:00",
+             "9시 반 도착": "21:30", "저녁 7시 도착": "19:00", "21시 도착": "21:00"}
+    got = {t: thinq.rule_understand(t)["fields"].get("arrive_home") for t in cases}
+    f, _ = L.detect_leave([{"at": "00:30", "kind": "exit", "place": "office"}],
+                          consent=True, commute_min=37, window=["21:00", "02:00"])
+    g, _ = L.detect_leave([{"at": "12:10", "kind": "exit", "place": "office"}],
+                          consent=True, commute_min=37, window=["21:00", "02:00"])
+    bad = {t: (got[t], w) for t, w in cases.items() if got[t] != w}
+    ok = not bad and f and f["leave_office"] == "00:35" and g is None
+    return ok, (f"{len(cases) - len(bad)}/{len(cases)}" + (f" 틀림 {bad}" if bad else "")
+                + f" · 21:00~02:00 시간대 00:30 이탈 → {f and f['leave_office']} · 점심 {g}")
+
+
+@check("말한 귀가 시각을 위치 추정·앞뒤 안 맞는 계산보다 믿는다")
+def p5_said_arrive():
+    loc = [{"at": "21:03", "kind": "exit", "place": "office"}]
+    a = thinq.understand("9시 50분 도착", profile={"commute_min": 37, "location_consent": True},
+                         location=loc)["persona"]
+    b = thinq.understand("9시 도착", profile={"commute_min": 37, "location_consent": True},
+                         location=loc)            # 퇴근 추정(21:08)이 귀가보다 늦다
+    c = thinq.understand("지금 퇴근해, 40분 걸려, 9시 도착", now="18:40")
+    cp = c["persona"]
+    ok = (a["arrive_home"] == "21:50" and a["commute_min"] == 42
+          and b["persona"].get("leave_office") is None
+          and any("위치를 쓰지 않는다" in r for r in b["read"])
+          and cp["arrive_home"] == "21:00" and cp["commute_min"] == 140
+          and any("맞지 않는다" in r for r in c["read"]))
+    return ok, (f"위치+귀가 {a['arrive_home']}/{a['commute_min']}분 · "
+                f"귀가보다 늦은 퇴근 추정 → {b['persona'].get('leave_office')} · "
+                f"말끼리 모순 → 집 밖 {cp['commute_min']}분")
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

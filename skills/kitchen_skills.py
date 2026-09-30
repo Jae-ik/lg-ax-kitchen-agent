@@ -383,6 +383,8 @@ class ProcureSkill(Skill):
         # lookup 이 돌려주는 Offer 에 can_order 가 실려 온다. 주문까지 되는
         # 상점이 없으면 값이 얼마든 자동 주문하지 않는다.
         "avoid": "list[str]  알레르기·기피 품목",
+        "match": "(품목명, 기피어 목록) -> bool | None  품목에 기피어가 들었는가. "
+                 "주입받는다. 없으면 **부분 일치**(새우 → 새우젓도 걸린다)",
         "auto_limit_krw": "int  1회 자동 주문 상한",
         "deadline_min": "int | None  이 시간 안에 도착해야 한다",
         "mode": "str | None  고객이 정해 둔 주문 방식 — auto(되는 것은 자동 "
@@ -397,7 +399,7 @@ class ProcureSkill(Skill):
     def run(self, missing: list, lookup, known_items: list | None = None,
             avoid: list | None = None, auto_limit_krw: int = 15000,
             deadline_min: int | None = None, mode: str | None = None,
-            **_) -> SkillResult:
+            match=None, **_) -> SkillResult:
         known = set(known_items or [])
         avoid = set(avoid or [])
         auto, ask, self_buy, ev = [], [], [], []
@@ -419,8 +421,15 @@ class ProcureSkill(Skill):
             if not offers:
                 ask.append({"name": name, "reason": "취급하는 상점 없음"})
                 ev.append(f"{name}: 어느 상점에도 없음 → 확인 요청"); continue
-            if name in avoid:
-                ask.append({"name": name, "reason": "알레르기·기피 목록에 있음"})
+            # **포함 일치로 본다.** 전에는 이름이 정확히 같아야 걸려서, 기피어
+            # '새우' 인 가구에 '새우젓'·'꽃게' 를 자동 주문했다(2026-09-30).
+            # 메뉴 단계가 먼저 걸러 파이프라인에서는 닿지 않았지만, 이 스킬만
+            # 따로 쓰면 안전 필터가 뚫려 있었다.
+            hit = (match(name, sorted(avoid)) if match is not None
+                   else any(a and a in name for a in avoid))
+            if hit:
+                ask.append({"name": name, "reason": "알레르기·기피 목록에 있음",
+                            "safety": True})
                 ev.append(f"{name}: 안전 필터에 걸려 자동 주문 보류"); continue
             if mode == "self":
                 # 사람이 직접 산다 — 배송 시간·주문 가능 여부는 상관없다.

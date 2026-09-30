@@ -60,7 +60,12 @@ def detect_leave(events: list, *, consent: bool, commute_min: int | None,
         if e.get("kind") != "exit":
             continue
         t = _m(e["at"])
-        if not (_m(lo) <= t <= _m(hi)):
+        # 시간대가 자정을 걸칠 수 있다(야근 21:00~02:00). 전에는 lo<=t<=hi
+        # 만 봐서 00:30 퇴근을 못 찾았다 — 퇴근이 불규칙한 야근 가구가
+        # 바로 이 경우다(2026-09-30).
+        a, b = _m(lo), _m(hi)
+        inside = (a <= t <= b) if a <= b else (t >= a or t <= b)
+        if not inside:
             why.append(f"{e['at']} 회사 나섬 — 퇴근 시간대({lo}~{hi}) 밖이라 "
                        f"퇴근으로 보지 않는다")
             continue

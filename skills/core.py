@@ -431,6 +431,7 @@ class AftercareSkill(Skill):
                    (0, "울/섬세", 45, 30, 35.0, 49)],
     }
     QUIET_DB = 45              # 이 값 이하를 '조용하다' 로 본다
+    QUIET_UNTIL = "07:00"   # 조용 시간이 끝나는 아침 시각(가정)
     QUIET_PENALTY_MIN = 0.40   # 저소음으로 돌리면 시간이 이만큼 늘어난다
     BASELINE_STRENGTH = 1        # 정보가 없으면 늘 '표준' 을 쓴다
 
@@ -533,11 +534,18 @@ class AftercareSkill(Skill):
         # 보지 않았다 — 문장과 동작이 어긋나 있었다.
         minutes, noise_db, quiet_note = chosen[2], chosen[5], None
         if start_at and quiet_after:
+            # 조용 시간은 **구간**이다: quiet_after 부터 아침 QUIET_UNTIL 까지
+            # (가정). 코스가 그 구간과 겹치는 분을 센다. 전에는 끝 시각에서
+            # 조용 시각을 빼기만 해서, 00:55 에 시작하는 코스가 조용 시각
+            # 23:00 보다 "앞" 으로 계산돼 "23:00 전에 끝난다 — 조치 불필요" 가
+            # 나왔다(이미 조용해야 할 시간 한가운데다, 2026-09-30).
             s0, q0 = self._to_min(start_at), self._to_min(quiet_after)
-            if q0 < s0:                     # 조용 시각이 자정을 넘긴 경우
-                q0 += 24 * 60
+            q1 = self._to_min(self.QUIET_UNTIL)
+            if q1 <= q0:
+                q1 += 24 * 60
             end = s0 + chosen[2]
-            over = end - q0
+            over = sum(max(0, min(end, q1 + k) - max(s0, q0 + k))
+                       for k in (-24 * 60, 0, 24 * 60))
             if over > 0:
                 if chosen[5] <= self.QUIET_DB:
                     quiet_note = (f"{quiet_after} 이후 {over}분간 더 돌지만 "

@@ -183,6 +183,22 @@ def how() -> str:
 
 
 # ── 자연어 → 상황 ──────────────────────────────────────────────────────
+def _hour_of(h: int, before: str) -> int:
+    """'N시' 의 N 을 24시간으로. 바로 앞의 말(before)을 본다.
+
+    저녁 에이전트라 말이 없으면 오후로 읽는다(3시 → 15시). 전에는 12 미만을
+    **무조건** 오후로 읽어 "새벽 1시 도착" 이 13:00, "아침 8시" 가 20:00,
+    "밤 12시 반" 이 12:30 이 됐다 — 야근 가구가 자정 넘어 말하는 시각이다.
+    """
+    if h > 12:
+        return h
+    if any(k in before for k in ("새벽", "아침", "오전")):
+        return 0 if h == 12 else h
+    if h == 12 and any(k in before for k in ("밤", "자정")):
+        return 0
+    return h + 12 if h < 12 else h
+
+
 def rule_understand(text: str, now: str | None = None) -> dict:
     """키 없이 읽는다. LLM 이 없을 때의 폴백이자, LLM 결과의 대조군이다.
 
@@ -196,8 +212,7 @@ def rule_understand(text: str, now: str | None = None) -> dict:
     for m in re.finditer(r"(\d{1,2})\s*시\s*(반|(\d{1,2})\s*분)?", text):
         h = int(m.group(1))
         mi = 30 if m.group(2) == "반" else int(m.group(3) or 0)
-        if "저녁" in text or "밤" in text or "늦" in text or h < 12:
-            h = h + 12 if h < 12 else h
+        h = _hour_of(h, text[max(0, m.start() - 4):m.start()])
         hhmm = f"{h % 24:02d}:{mi:02d}"
         if re.match(r"\s*(에|쯤|쯤에)?\s*퇴근", text[m.end():]):
             got["leave_office"] = hhmm
@@ -388,9 +403,19 @@ def _leave_from(persona: dict, said: dict, location, read: list) -> None:
             commute_min=persona.get("commute_min"),
             window=persona.get("leave_window"))
         read.extend(f"위치: {w}" for w in why)
+        if found and "arrive_home" in said:
+            # **말한 귀가 시각이 위치 추정보다 확실하다.** 전에는 위치가 계산한
+            # 귀가로 말한 것을 덮었다. 집 밖 시간은 두 시각의 차로 본다.
+            away = (L._m(said["arrive_home"]) - L._m(found["leave_office"])) % 1440
+            if not 0 < away <= 180:
+                read.append(f"위치: 퇴근 추정 {found['leave_office']} 이 말한 귀가 "
+                            f"{said['arrive_home']} 와 맞지 않아 위치를 쓰지 않는다")
+                found = None
+            else:
+                found = dict(found, commute_min=away, arrive_home=said["arrive_home"])
         if found:
             persona.update({k: v for k, v in found.items() if k != "left_at"})
-            return                      # 귀가 시각은 위치가 이미 맞췄다
+            return
     if not persona.get("leave_office"):
         if persona.pop("commute_min", None) is not None:
             read.append("집까지 걸리는 시간은 알지만 퇴근을 몰라 퇴근길에 할 일을 "
@@ -398,6 +423,22 @@ def _leave_from(persona: dict, said: dict, location, read: list) -> None:
         return
     lv = L._m(persona["leave_office"])
     commute = persona.get("commute_min")
+    if "arrive_home" in said and commute is not None:
+        # 퇴근·이동·귀가를 다 말했는데 **서로 맞지 않으면** 알린다(들렀다 오는
+        # 날일 수 있다). 말한 귀가를 따르고 집 밖 시간을 두 시각의 차로 본다.
+        away = (L._m(said["arrive_home"]) - lv) % 1440
+        if away != commute:
+            read.append(f"퇴근 {persona['leave_office']} + {commute}분 = "
+                        f"{L._hhmm(lv + commute)} 이 말한 귀가 {said['arrive_home']} "
+                        f"와 맞지 않는다 — 귀가를 따르고 집 밖 시간을 {away}분으로 본다")
+            if 0 < away <= 180:
+                persona["commute_min"] = commute = away
+            else:
+                read.append("집 밖 시간이 말이 되지 않아 퇴근길에 할 일을 정하지 않았다")
+                persona.pop("leave_office", None)
+                persona.pop("leave_source", None)
+                persona.pop("commute_min", None)
+                return
     if "arrive_home" in said and commute is None:
         commute = (L._m(said["arrive_home"]) - lv) % (24 * 60)
         if 0 < commute <= 180:
@@ -741,7 +782,11 @@ def main() -> int:
     print(f"\n사용자: {text}")
     print(f"LLM: {how()}")
 
-    out = run(text, ask=ask, approve=(lambda c: True) if yes else None)
+    # "지금 퇴근해" 는 지금 시각이 있어야 읽힌다 — 명령줄에서는 이 컴퓨터의
+    # 시계를 쓴다(실제 기기라면 휴대폰 시계). 전에는 넘기지 않아 못 읽었다.
+    import datetime
+    now = datetime.datetime.now().strftime("%H:%M")
+    out = run(text, ask=ask, approve=(lambda c: True) if yes else None, now=now)
     u = out["understood"]
     print(f"\n[읽은 것] ({u['by']})")
     for w in u["read"]:

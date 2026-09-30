@@ -19,6 +19,21 @@ from typing import Callable
 from .base import Skill, SkillResult
 
 
+def night_order(ref: str | None):
+    """장면 시각 정렬 키. ref(귀가) 6시간 전부터 24시간을 한 줄로 본다.
+
+    저녁 장면은 자정을 넘기기 쉽다 — 야근 귀가 00:30, 세척 01:20.
+    ref 가 없으면 그냥 시각 순이다.
+    """
+    def m(hhmm):
+        h, mi = map(int, hhmm.split(":"))
+        return h * 60 + mi
+    if not ref:
+        return lambda b: m(b["at"])
+    base = m(ref) - 360
+    return lambda b: (m(b["at"]) - base) % 1440
+
+
 def friction_hit(f: dict, removes) -> bool:
     """장면의 removes 문장(들)이 이 수고를 덮는가.
 
@@ -252,8 +267,10 @@ class ScenarioDraftSkill(Skill):
         beats = list(beats_for(persona, constraints, self._plus))
         ev = [f"도메인이 준 장면 후보 {len(beats)}개"]
 
-        # 장면은 시각 순으로 읽혀야 한다 — 퇴근이 귀가보다 앞이다
-        beats.sort(key=lambda b: b["at"])
+        # 장면은 시각 순으로 읽혀야 한다 — 퇴근이 귀가보다 앞이다.
+        # **문자열로 정렬하면 자정에서 깨진다**(23:50 퇴근 · 00:30 귀가가
+        # "00:30 → 23:50" 으로 나왔다). 귀가 6시간 전부터 이어지는 시간으로 본다.
+        beats.sort(key=night_order(persona.get("arrive_home")))
 
         removed = {b["removes"] for b in beats}
         for f in friction:
