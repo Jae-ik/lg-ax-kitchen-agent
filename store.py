@@ -157,6 +157,12 @@ _QUICK = {k: v for k, v in BASE_PRICE.items() if k not in _NOT_QUICK}
 # 결과가 어떻게 바뀌는지는 delivery_sensitivity.py 가 잰다.
 QUICK_DELIVERY_MIN = 27
 
+# 직접 장보기(order_mode="self")에 드는 시간(분). **가정**이다 — 통계를
+# 확인하지 못했다. 퇴근길에 들르면 그만큼 늦게 도착하고, 집에서 다녀오면
+# 왕복까지 든다. 오프라인 매장도 위 상점과 같은 품목을 판다고 본다(가정).
+SHOP_DETOUR_MIN = 15     # 퇴근길에 마트에 들러 사는 데 더 드는 시간
+SHOP_TRIP_MIN = 25       # 집에 온 뒤 다녀오는 시간(왕복 포함)
+
 STORES = [
     Store("즉시배송", delivery_min=QUICK_DELIVERY_MIN, price_factor=1.10, catalog=_QUICK,
           can_order=True, source="시뮬레이터(제휴 가정)"),

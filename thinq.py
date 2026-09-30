@@ -56,6 +56,14 @@ NEEDS_CONFIRM = ("avoid", "max_sodium_mg")
 _FOOD = ("배추", "두부", "된장", "애호박", "닭고기", "간장", "대파", "미나리",
          "찹쌀", "계란", "달걀", "양파", "무", "버섯", "고기", "우유", "새우")
 _NO_STOCK = ("아무것도 없", "텅 비", "하나도 없", "다 떨어")
+# 오늘의 주문 방식을 알아보는 말. 순서가 우선순위다(직접 > 묻기 > 자동).
+_MODE_CUES = (
+    ("self", r"(내가|제가|직접)\s*[^.,]{0,8}?(사\s*갈|사\s*올|사서|살게|사갈|들를|들러)"
+             r"|(장|마트)[은는을를]?\s*(내가|제가)"),
+    ("ask", r"(물어보고|묻고|확인하고|확인받고)\s*[^.,]{0,4}?(사|시켜|주문)"
+            r"|(시키기|사기|주문하기)\s*전에\s*(물어|확인)"),
+    ("auto", r"알아서\s*[^.,]{0,4}?(시켜|주문|사|장)"),
+)
 _HANGUL_NUM = {"한": 1, "하나": 1, "혼자": 1, "둘": 2, "두": 2, "셋": 3,
                "세": 3, "넷": 4, "네": 4, "다섯": 5, "여섯": 6}
 _DEFAULT = {
@@ -85,6 +93,9 @@ PROMPT = """사용자가 한국어로 말한 상황에서 아래 항목을 뽑�
   goal_hint          str      한 줄 요약
   friction_reported  [str]    사용자가 말한 불편
   fridge             [{name, qty_g, stored_days, shelf_life_days}]
+  order_mode         "auto"|"ask"|"self"  오늘 장보기를 어떻게 할지 — 알아서
+                     주문(auto) · 묻고 사기(ask) · 직접 사 가기(self). 말하지
+                     않았으면 넣지 마라
 
 사용자 말: {text}"""
 
@@ -238,6 +249,20 @@ def rule_understand(text: str) -> dict:
             got["fridge"] = [{"name": f} for f in found]
             why.append(f"재료로 읽음: {', '.join(found)} (양은 가정, 보관일은 모름)")
 
+    # 오늘의 주문 방식. **직접 사겠다** 를 먼저 본다 — "알아서 시키지 말고
+    # 내가 사 갈게" 처럼 둘이 섞이면 사람이 하겠다는 쪽이 이긴다.
+    for mode, pat in _MODE_CUES:
+        mm = re.search(pat, text)
+        # "알아서 사지 마" 는 자동 주문이 아니라 그 반대다. 부정이 붙으면
+        # 그 방식으로 읽지 않는다(읽지 못하면 기본값 ask — 묻는 쪽).
+        if mm and re.match(r"[^.,]{0,3}?(지|진)\s*(마|말|않)", text[mm.end():]):
+            why.append(f"'{mm.group(0)}…' 에 부정이 붙어 주문 방식 {mode} 로 읽지 않음")
+            continue
+        if mm:
+            got["order_mode"] = mode
+            why.append(f"'{mm.group(0)}' → 주문 방식 {mode}")
+            break
+
     if "아침" in text and ("바쁘" in text or "일찍" in text):
         got["next_morning_rush"] = True
         why.append("아침에 여유가 없다고 읽음")
@@ -314,6 +339,8 @@ def _validate(fields: dict):
         "goal_hint": (str, lambda v: len(v) <= 200),
         "avoid": (list, lambda v: all(isinstance(x, str) for x in v)),
         "friction_reported": (list, lambda v: all(isinstance(x, str) for x in v)),
+        # 오늘의 주문 방식. 세 값 밖이면 버린다 — 버리면 기본값(ask, 묻기)이다.
+        "order_mode": (str, lambda v: v in ("auto", "ask", "self")),
         # 이름만 있으면 받되 **나머지는 우리가 채운다.** 사용자는
         # "배추 있어" 라고만 말하고 보관일을 말하지 않는다. LLM 도
         # 그렇게 준다 — 실제로 stored_days 가 빠진 항목이 와서

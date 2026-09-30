@@ -16,6 +16,14 @@ PERSONAS = {
         "label": "야근이 잦은 1인 가구",
         "household_size": 1,
         "arrive_home": "21:40",
+        # 야근이라 퇴근 시각이 매일 다르다 — **모른다**. 이 가구에서 플래너가
+        # 조달을 스스로 뺀다(제안서 표6·실행영상의 핵심 장면).
+        # 퇴근할 때 알린다면 어떻게 되는지는 mode_sensitivity 가 이 값으로 잰다
+        # (이동은 통계청 통근 평균의 절반 37분, 가정).
+        "leave_if_notified": {"leave_office": "21:03", "commute_min": 37,
+                              "leave_source": "message"},
+        # 주문 방식: 고객이 정해 둔 선호. 그날 말로 바꿀 수 있다(thinq).
+        "order_mode": "auto",
         "time_budget_min": 25,          # 귀가 후 식사까지 쓸 수 있는 시간
         "next_morning_rush": True,      # 아침에 여유가 없다
         "avoid": [],
@@ -45,6 +53,8 @@ PERSONAS = {
         # 알면 메뉴·승인·주문을 **현관에 들어서기 전에** 끝낼 수 있다.
         "leave_office": "18:43",
         "commute_min": 37,
+        # 누가 장볼지 정하는 것부터 부담 → 되는 것은 알아서
+        "order_mode": "auto",
         "time_budget_min": 45,
         "next_morning_rush": True,
         "avoid": [],
@@ -72,6 +82,8 @@ PERSONAS = {
         # 알면 메뉴·승인·주문을 **현관에 들어서기 전에** 끝낼 수 있다.
         "leave_office": "17:53",
         "commute_min": 37,
+        # 못 먹는 것이 섞일까 봐 사는 것은 매번 확인하고 싶다
+        "order_mode": "ask",
         "time_budget_min": 60,
         "next_morning_rush": False,
         "avoid": ["표고버섯", "새우"],   # 가구원 알레르기
@@ -101,6 +113,7 @@ PERSONAS = {
         # 앞의 세 상황에는 이 두 값이 없어 귀가 후에야 판단을 시작한다.
         "leave_office": "18:40",
         "commute_min": 40,
+        "order_mode": "auto",
         "arrive_home": "19:20",
         "time_budget_min": 25,          # 귀가 후 식사까지
         "next_morning_rush": True,

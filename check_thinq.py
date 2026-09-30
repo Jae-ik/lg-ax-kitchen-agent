@@ -261,6 +261,19 @@ def _design(pid, reply, persona_reply=None):
         return run_design.design_for(pid, Trace(), beats_factory=fac)
 
 
+def _no_leave(pid):
+    """퇴근 정보를 지운 판. '퇴근 시각을 모르고 조달을 건너뛰는 가구' 가
+    필요한 시험은 가구를 빌리지 않고 이렇게 만든다 — 가구의 퇴근 정보가
+    바뀌어도(9/29 p3, 9/30 p1 을 잠시) 시험의 전제가 그대로다."""
+    import personas
+    p = personas.get(pid)
+    for k in ("leave_office", "commute_min", "leave_source"):
+        p.pop(k, None)
+    new = pid + "_퇴근모름"
+    personas.PERSONAS[new] = dict(p, id=new)
+    return new
+
+
 def _scenes(*scenes, uncovered=()):
     return json.dumps({"scenes": [
         {"offset_min": o, "user": u, "system": sy, "skill": sk, "friction": f}
@@ -288,12 +301,12 @@ def d1():
 
 @check("이번 계획에 없는 기능을 약속한 장면은 버린다")
 def d2():
-    """p1 은 조달을 건너뛴다. '주문한다' 장면은 실행되지 않을 약속이다.
-    처음엔 플래너를 직접 불러 p1 에 procure 가 허용됐다."""
+    """퇴근 시각을 모르는 p1 은 조달을 건너뛴다. '주문한다' 장면은 실행되지
+    않을 약속이다. 처음엔 플래너를 직접 불러 p1 에 procure 가 허용됐다."""
     sc = _scenes((0, "장을 안 본다", "부족분을 주문한다", "procure", [0]),
                  (1, "썰지 않는다", "로봇팔이 썰어 준다", "robot_arm", [0]),
                  (5, "부를 때만 온다", "화력을 맞춘다", "converge", [1]))
-    r = _design("p1_야근", sc)["design_report"]
+    r = _design(_no_leave("p1_야근"), sc)["design_report"]
     rej = " ".join(r["rejected"])
     ok = ("procure" in rej and "robot_arm" in rej
           and any("converge" in a for a in r["accepted"]))
@@ -350,10 +363,10 @@ def d6():
 
 @check("선제 주문이 아니면 귀가 전 장면을 귀가 시각으로 옮긴다")
 def d7():
-    # p1 은 퇴근 시각을 모른다(야근). p3 로 재다가 p3 에 퇴근 정보가 생겨
-    # 선제 주문 가구가 되자 이 시험이 성립하지 않았다.
+    # 퇴근 시각을 모르는 가구로 잰다. p3 로 재다가 p3 에 퇴근 정보가 생겨
+    # 깨졌다 — 가구를 빌리지 않고 **퇴근 정보를 지운 판**을 만든다.
     sc = _scenes((-50, "고민하지 않는다", "메뉴를 골라 둔다", "menu", [0]))
-    r = _design("p1_야근", sc)
+    r = _design(_no_leave("p1_야근"), sc)
     b = [x for x in r["scenario"]["beats"] if x.get("source") == "LLM"][0]
     ok = b["at"] == "21:40" and r["design_report"]["adjusted"]
     return ok, f"장면 시각 {b['at']} · {r['design_report']['adjusted'][:1]}"
@@ -452,6 +465,97 @@ def _llm_scenes(pid, *scenes):
                                      conditional=KD.CONDITIONAL))
     with contextlib.redirect_stdout(io.StringIO()):
         return run_design.design_for(pid, Trace(), beats_factory=fac)
+
+
+# ── 9 주문 방식은 고객이 정한다 (2026-09-30) ───────────────────────────
+@check("오늘의 주문 방식을 말에서 읽고, 부정문은 그 방식으로 읽지 않는다")
+def m1():
+    cases = {"오늘은 내가 마트 들를게": "self", "장은 내가 볼게": "self",
+             "알아서 시켜": "auto", "물어보고 사": "ask",
+             "주문하기 전에 확인해줘": "ask",
+             # 둘이 섞이면 사람이 하겠다는 쪽이 이긴다
+             "알아서 시키지 말고 내가 사 갈게": "self",
+             # 부정 — 자동으로 읽으면 안 된다
+             "알아서 사지 마": None, "알아서 주문하지 마": None,
+             # 말하지 않았으면 비워 둔다(설계가 ask 로 채운다)
+             "7시 도착, 두부 있어": None}
+    bad = {t: (thinq.rule_understand(t)["fields"].get("order_mode"), want)
+           for t, want in cases.items()
+           if thinq.rule_understand(t)["fields"].get("order_mode") != want}
+    return not bad, f"{len(cases) - len(bad)}/{len(cases)}" + (f" 틀림 {bad}" if bad else "")
+
+
+@check("LLM 이 준 주문 방식이 세 값 밖이면 버린다")
+def m2():
+    ok_, bad_ = thinq._validate({"order_mode": "self"})
+    ok2, bad2 = thinq._validate({"order_mode": "가끔"})
+    ok3, bad3 = thinq._validate({"order_mode": 1})
+    ok = (ok_.get("order_mode") == "self" and "order_mode" not in ok2
+          and "order_mode" not in ok3 and bad2 and bad3)
+    return ok, f"self 받음 · '가끔' 버림 {bad2[:1]} · 1 버림"
+
+
+@check("어느 주문 방식이든 처음 사는 것·못 먹는 것은 자동으로 사지 않는다")
+def m3():
+    """같은 부족분을 방식만 바꿔 조달에 준다. 방식은 개입과 시간을 맞바꿀 뿐,
+    안전 바닥(처음 사는 것·못 먹는 것·상한)은 어느 방식에서도 안 풀린다."""
+    from skills import REGISTRY
+
+    def lookup(n):
+        return [{"item": n, "store": "즉시", "price_krw": 3000,
+                 "delivery_min": 27, "can_order": True}]
+    proc = REGISTRY.get("procure")
+    out = {}
+    for mode in ("auto", "ask", "self", None, "가끔"):
+        r = proc.run(missing=["두부", "찹쌀", "새우"], lookup=lookup,
+                     known_items=["두부"], avoid=["새우"], deadline_min=37,
+                     mode=mode).output
+        out[mode] = ([a["name"] for a in r["auto_ordered"]],
+                     [c["name"] for c in r["need_confirm"]],
+                     [s["name"] for s in r["self_buy"]], r["mode"])
+    ok = (out["auto"][:3] == (["두부"], ["찹쌀", "새우"], [])
+          and out["ask"][:3] == ([], ["두부", "찹쌀", "새우"], [])
+          # 직접 장보기: 사람이 사니 처음 사는 것도 목록에 오르지만
+          # 못 먹는 것은 목록에도 넣지 않고 묻는다
+          and out["self"][:3] == ([], ["새우"], ["두부", "찹쌀"])
+          # 모르면 묻는 쪽
+          and out[None][3] == "ask" and out["가끔"][3] == "ask"
+          and out[None][:3] == out["ask"][:3])
+    return ok, " · ".join(f"{k}: 자동{v[0]} 확인{v[1]} 직접{v[2]}"
+                          for k, v in out.items() if k in ("auto", "ask", "self"))
+
+
+@check("주문 방식을 정해 두지 않은 가구는 묻는 쪽으로 설계된다")
+def m4():
+    import contextlib
+    import io
+    import personas
+    import run_design
+    from orchestrator import Trace
+    p = personas.get("p2_맞벌이")
+    p.pop("order_mode", None)
+    personas.PERSONAS["_m4"] = dict(p, id="_m4")
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = run_design.design_for("_m4", Trace(), seed=7)
+    finally:
+        del personas.PERSONAS["_m4"]
+    m = r["verify"]["metrics"]
+    ok = (m.get("주문 방식") == "매번 확인" and r["verify"]["user_touches"] >= 1
+          and not m.get("자동 주문(원)"))
+    return ok, f"주문 방식 {m.get('주문 방식')} · 개입 {r['verify']['user_touches']}"
+
+
+@check("직접 장보기는 들른 시간만큼 식사가 늦고, 개입은 늘지 않는다")
+def m5():
+    import mode_sensitivity as ms
+    a = ms.run_one("p2_맞벌이", "auto", True)
+    s = ms.run_one("p2_맞벌이", "self", True)
+    import store
+    ok = (s["verified"] and s["touches"] == 0 and s["self_buy"]
+          and abs(s["meal_min"] - a["meal_min"] - store.SHOP_DETOUR_MIN) < 0.05)
+    return ok, (f"auto {a['meal_min']}분 · self {s['meal_min']}분 "
+                f"(+{store.SHOP_DETOUR_MIN}분 가정) · 직접 {s['self_buy']}")
 
 
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")

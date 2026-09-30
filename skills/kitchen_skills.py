@@ -385,17 +385,30 @@ class ProcureSkill(Skill):
         "avoid": "list[str]  알레르기·기피 품목",
         "auto_limit_krw": "int  1회 자동 주문 상한",
         "deadline_min": "int | None  이 시간 안에 도착해야 한다",
+        "mode": "str | None  고객이 정해 둔 주문 방식 — auto(되는 것은 자동 "
+                "주문) · ask(매번 묻고 산다) · self(주문하지 않고 살 것 목록만). "
+                "모르면 ask",
     }
+    MODES = ("auto", "ask", "self")
     reusable_for = ["식재료 조달", "세제·소모품 재주문", "필터·부품 교체"]
     requires = ("missing_items",)
     provides = ("stock_complete",)
 
     def run(self, missing: list, lookup, known_items: list | None = None,
             avoid: list | None = None, auto_limit_krw: int = 15000,
-            deadline_min: int | None = None, **_) -> SkillResult:
+            deadline_min: int | None = None, mode: str | None = None,
+            **_) -> SkillResult:
         known = set(known_items or [])
         avoid = set(avoid or [])
-        auto, ask, ev = [], [], []
+        auto, ask, self_buy, ev = [], [], [], []
+        # 주문 방식은 **고객이 정한다.** 모르면 묻는 쪽이다 — 돈을 쓰는 것은
+        # 되돌릴 수 없고, 모를 때의 기본값은 멈춤이다(2026-09-28).
+        # 어느 방식이든 처음 사는 것·상한 초과·못 먹는 것은 자동으로 사지 않는다.
+        if mode not in self.MODES:
+            ev.append(f"주문 방식을 모른다({mode!r}) — 매번 묻는 쪽(ask)으로 한다")
+            mode = "ask"
+        else:
+            ev.append(f"주문 방식: {mode} (고객이 정해 둔 것)")
         # 기한이 없으면 **2일 배송도 통과한다.** 조용히 그렇게 되지 않도록
         # 로그에 남긴다 — 호출자가 기한을 안 넘긴 것이 의도인지 보이게.
         if deadline_min is None:
@@ -409,6 +422,12 @@ class ProcureSkill(Skill):
             if name in avoid:
                 ask.append({"name": name, "reason": "알레르기·기피 목록에 있음"})
                 ev.append(f"{name}: 안전 필터에 걸려 자동 주문 보류"); continue
+            if mode == "self":
+                # 사람이 직접 산다 — 배송 시간·주문 가능 여부는 상관없다.
+                # 못 먹는 것은 위에서 이미 걸렀다(목록에도 넣지 않는다).
+                self_buy.append({"name": name})
+                ev.append(f"{name}: 직접 장보기 — 주문하지 않고 살 것 목록에 넣는다")
+                continue
 
             # 제안(offer)은 **dict 로도 객체로도** 올 수 있다.
             # 전에는 o.delivery_min 처럼 속성으로만 읽어, dict 를 주면
@@ -454,6 +473,10 @@ class ProcureSkill(Skill):
                 ask.append({"name": name,
                             "reason": f"{g(best, 'price_krw'):,}원 > 상한 {auto_limit_krw:,}원"})
                 ev.append(f"  {name}: 금액 상한 초과 → 확인 요청"); continue
+            if mode == "ask":
+                ask.append({"name": name, "reason": "매번 묻고 사기로 한 주문 방식"})
+                ev.append(f"  {name}: 자동 주문할 수 있지만 고객이 매번 묻기로 했다 "
+                          f"→ 확인 요청"); continue
 
             auto.append({"name": name, "price_krw": g(best, "price_krw"),
                          "store": g(best, "store"),
@@ -465,5 +488,6 @@ class ProcureSkill(Skill):
         total = sum(a["price_krw"] for a in auto)
         eta = max((a["delivery_min"] for a in auto), default=0)
         return SkillResult(True, {"auto_ordered": auto, "need_confirm": ask,
+                                  "self_buy": self_buy, "mode": mode,
                                   "total_krw": total, "arrive_in_min": eta},
                            ev or ["조달할 항목 없음"])

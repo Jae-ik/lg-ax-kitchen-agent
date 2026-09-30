@@ -124,7 +124,9 @@ def _supplies():
     r = REGISTRY.get("procure").run(missing=["정수기 필터", "세탁조 클리너"],
                                     lookup=lookup,
                                     known_items=["정수기 필터"],
-                                    auto_limit_krw=15000)
+                                    auto_limit_krw=15000,
+                                    # 주문 방식을 안 주면 묻는 쪽(ask)이 기본이다
+                                    mode="auto")
     auto = [a["name"] for a in r.output["auto_ordered"]]
     ask = [c["name"] for c in r.output["need_confirm"]]
     # 사 본 적 있는 것만 자동, 처음 사는 것은 묻는다 — 주방과 같은 판단
@@ -368,7 +370,9 @@ def _parts():
                  "delivery_min": 2880, "in_stock": True, "can_order": True}]
     r = REGISTRY.get("procure").run(missing=["헤파필터", "배수호스"],
                                     lookup=lookup, known_items=["헤파필터"],
-                                    auto_limit_krw=15000)
+                                    auto_limit_krw=15000,
+                                    # 주문 방식을 안 주면 묻는 쪽(ask)이 기본이다
+                                    mode="auto")
     auto = [a["name"] for a in r.output["auto_ordered"]]
     ask = [c["name"] for c in r.output["need_confirm"]]
     ok = r.ok and auto == ["헤파필터"] and ask == ["배수호스"]

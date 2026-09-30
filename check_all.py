@@ -24,6 +24,7 @@
     python check_all.py --fast    오래 걸리는 것(분산 측정)은 건너뛴다
 """
 from __future__ import annotations
+import ast
 import os
 import subprocess
 import sys
@@ -138,6 +139,19 @@ def main() -> int:
     failed = []
     for script, what, _ in CHECKS:
         code, out, sec = _run(script)
+        # **같은 이름의 검사 함수가 두 번 있으면 앞의 것은 조용히 사라진다.**
+        # 2026-09-30 에 새 검사를 c5b 로 넣었는데 이미 c5b 가 있어, 뒤의 것이
+        # 앞의 것을 덮어 새 검사가 한 번도 돌지 않았다(통과로 보였다).
+        # (전역 이름으로 검사를 찾는 check_consistency 에서만 실제로 사라진다.
+        #  데코레이터가 목록에 넣는 파일은 둘 다 돈다 — check_cooking 의 c18 이
+        #  그랬다. 그래도 이름은 하나로 맞춘다: 어느 방식인지 매번 따지지 않도록.)
+        with open(script, encoding="utf-8") as f:
+            tops = [d.name for d in ast.parse(f.read()).body
+                    if isinstance(d, ast.FunctionDef)]
+        dup = sorted({t for t in tops if tops.count(t) > 1})
+        if dup:
+            code = 1
+            out += f"\n!! 같은 이름의 함수가 두 번 있다 — 앞의 것이 덮인다: {dup}"
         # **아무것도 안 하고 끝난 검사는 통과가 아니다.** 패치로 파일 끝의
         # `if __name__ == "__main__":` 이 지워져 check_generalize 가 아무것도
         # 돌리지 않고 종료 코드 0 으로 끝났는데, 여기서 통과로 셌다.

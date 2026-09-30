@@ -312,6 +312,10 @@ KITCHEN_TERMS = {"amount": "조리량", "finish": "세척",
                  "avoid_check_cues": ("알레르기", "못 먹", "먹으면 안 되")}
 
 
+# 흐름상 필요하지만 고객 불편과 짝이 없는 장면. llm_design.BACKGROUND 와 같은 문구다.
+BACKGROUND_REMOVES = "(흐름상 필요한 장면 — 고객이 말한 불편과 직접 짝은 없다)"
+
+
 def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
     """주방 도메인의 장면 목록.
 
@@ -337,9 +341,12 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
     beats = []
 
     # verified_by: 이 장면이 실제로 일어났는지 확인할 실행 스킬.
+    mode = constraints.get("order_mode", "ask")
+    by_msg = constraints.get("leave_source") == "message"
     if pre:
         beats.append({
-            "at": lv, "user": "퇴근길에 메시지를 받는다",
+            "at": lv, "user": ("퇴근한다고 알리면 메시지가 온다" if by_msg
+                               else "퇴근길에 메시지를 받는다"),
             "system": "냉장고 재고·남은 시간·먹을 사람을 읽고 오늘 메뉴를 정해 알린다",
             # 메뉴를 집 밖에서 정하므로, 집에 와서 시간에 쫓기며 정할 일이 없다
             "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일 / "
@@ -361,14 +368,44 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
             "removes": "재료마다 못 먹는 것이 섞였는지 확인하는 일",
             "verified_by": "menu", "expect_metric": "메뉴"})
 
-    if pre:
+    # **계획에서 조달을 뺐으면 장면도 뺀다.** 퇴근길 분기를 먼저 보던 때,
+    # 직접 장보기(+들르는 시간)로 추정이 예산을 넘어 조달이 빠졌는데도
+    # "살 것 목록을 받는다" 장면이 남아 검증에서 걸렸다.
+    if constraints.get("skip_procurement"):
         beats.append({
-            "at": plus(lv, 2), "user": "메시지로 승인만 한다",
+            "at": plus(lv if pre else t0, 2), "user": "장을 보지 않는다",
+            "system": "시간이 모자라므로 지금 있는 재료만으로 가능한 것을 고른다",
+            "removes": "시간이 모자란 상태에서 메뉴를 정하는 일",
+            "verified_by": "menu", "expect_metric": "메뉴"})
+    elif pre and mode == "self":
+        # 고객이 직접 사기로 했다. 주문하지 않고 **살 것 목록**만 보낸다.
+        # "장보러 들르는 일" 은 덜어 주지 않는다 — 고객이 고른 것이다.
+        shop = constraints.get("self_shop_min", 0)
+        beats.append({
+            "at": plus(lv, 2), "user": "퇴근길에 살 것 목록을 받는다",
+            "system": "냉장고와 양념 선반을 함께 보고 부족한 것을 목록으로 보낸다. "
+                      "주문은 하지 않는다. 못 먹는 재료는 목록에 넣지 않는다",
+            "removes": "집에 와서 뭐가 없는지 그제야 아는 일 / "
+                       "양념이 떨어진 걸 조리 중에 발견하는 일",
+            "verified_by": "procure",
+            "expect_any": ["직접 살 것", "조달 대기", "확인 요청"]})
+        beats.append({
+            "at": plus(t0, shop), "user": "사 온 재료를 들고 현관에 들어선다",
+            "system": "먹을 사람 수에 맞춰 넣을 양을 정하고 계량을 안내한다",
+            "removes": BACKGROUND_REMOVES,
+            "verified_by": "prep", "expect_metric": "조리량"})
+    elif pre:
+        ask_all = mode == "ask"
+        beats.append({
+            "at": plus(lv, 2),
+            "user": "메시지로 한 번에 승인한다" if ask_all else "메시지로 승인만 한다",
             # 설계 시점에는 자동 주문이 될지 확인이 필요할지 모른다 —
             # 판단 기준을 말하고 결과는 열어 둔다.
-            "system": "냉장고와 양념 선반을 함께 보고 부족한 것 중 되는 것은 주문하고, "
-                      "처음 사는 것처럼 판단이 안 되는 것만 물어 승인받는다. "
-                      "못 먹는 재료가 든 상품은 사지 않는다. 귀가 시각에 맞춰 도착한다",
+            "system": ("냉장고와 양념 선반을 함께 보고 부족한 것을 모아 한 번에 묻고, "
+                       "승인받은 것만 주문한다. " if ask_all else
+                       "냉장고와 양념 선반을 함께 보고 부족한 것 중 되는 것은 주문하고, "
+                       "처음 사는 것처럼 판단이 안 되는 것만 물어 승인받는다. ")
+                      + "못 먹는 재료가 든 상품은 사지 않는다. 귀가 시각에 맞춰 도착한다",
             "removes": "퇴근길에 장을 보러 들르는 일 / 누가 장을 볼지 매번 정하는 일 / "
                        "장을 볼 때 성분을 읽는 일 / 양념이 떨어진 걸 조리 중에 발견하는 일",
             "verified_by": "procure",
@@ -378,12 +415,14 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
             "system": "먹을 사람 수에 맞춰 넣을 양을 정하고 계량을 안내한다",
             "removes": "집에 와서 뭐가 없는지 그제야 아는 일",
             "verified_by": "prep", "expect_metric": "조리량"})
-    elif constraints.get("skip_procurement"):
+    elif mode == "self":
         beats.append({
-            "at": plus(t0, 2), "user": "장을 보지 않는다",
-            "system": "시간이 모자라므로 지금 있는 재료만으로 가능한 것을 고른다",
-            "removes": "시간이 모자란 상태에서 메뉴를 정하는 일",
-            "verified_by": "menu", "expect_metric": "메뉴"})
+            "at": plus(t0, 2), "user": "살 것 목록을 받아 다녀온다",
+            "system": "부족한 것을 목록으로 보낸다. 주문은 하지 않는다. "
+                      "못 먹는 재료는 목록에 넣지 않는다",
+            "removes": "양념이 떨어진 걸 조리 중에 발견하는 일",
+            "verified_by": "procure",
+            "expect_any": ["직접 살 것", "조달 대기", "확인 요청"]})
     else:
         beats.append({
             "at": plus(t0, 2), "user": "주문을 누르지 않는다",
@@ -485,10 +524,11 @@ KITCHEN_CAPS = {
     # 떨어진 상비품(양념)도 조달 대상이다(_procure_bind 의 pantry_refill).
     # 처음엔 이 설명에서 빠져, 진짜 LLM 이 p4 의 "양념이 떨어진 걸 조리 중에
     # 발견하는 일" 을 "양념은 추적 대상이 아니다" 며 못 덮는다고 했다.
-    "procure": ("냉장고 부족분과 **떨어진 양념·상비품**을 함께 모아, 이전 구매 "
-                "이력·금액 상한·못 먹는 재료 기준으로 판단해 주문하거나, 판단이 "
-                "안 되는 것만 고객에게 묻는다",
-                ["조달 대기", "확인 요청"]),
+    "procure": ("냉장고 부족분과 **떨어진 양념·상비품**을 함께 모아, 고객이 정해 둔 "
+                "주문 방식(auto: 되는 것은 자동 주문 · ask: 매번 묻고 산다 · self: "
+                "주문하지 않고 살 것 목록만)을 따른다. 어느 방식이든 처음 사는 것·"
+                "금액 상한 초과·못 먹는 재료는 자동으로 사지 않는다",
+                ["조달 대기", "확인 요청", "직접 살 것"]),
     "prep": ("먹는 사람 수와 조리기 용량에 맞춰 넣을 양을 정하고 계량을 안내한다",
              ["조리량"]),
     "converge": ("화력을 스스로 조절하고 목표 상태에 닿으면 불을 끈다. 재료 투입·"
@@ -751,8 +791,9 @@ def build_tasks(constraints: dict) -> list:
         return {"missing": need,
                 "lookup": store.make_lookup(),
                 "known_items": KNOWN_ITEMS, "avoid": avoid,
-                "auto_limit_krw": AUTO_LIMIT_KRW,
-                "deadline_min": constraints.get("budget_min")}
+                "auto_limit_krw": constraints.get("auto_limit_krw", AUTO_LIMIT_KRW),
+                "deadline_min": constraints.get("budget_min"),
+                "mode": constraints.get("order_mode")}
 
     def _procure_absorb(ctx, out):
         def qty_for(name):
@@ -766,6 +807,18 @@ def build_tasks(constraints: dict) -> list:
         eta = out.get("arrive_in_min", 0)
         for a in out["auto_ordered"]:
             K.fridge_add(a["name"], qty_for(a["name"]))
+        # 직접 장보기: 사람이 사 온다. 기다림은 없지만 **들른 시간**이 든다
+        # (가정 — store.SHOP_DETOUR_MIN / SHOP_TRIP_MIN).
+        ctx["order_mode"] = out.get("mode")
+        if out.get("self_buy"):
+            for sb in out["self_buy"]:
+                K.fridge_add(sb["name"], qty_for(sb["name"]))
+            ctx["self_buy"] = [sb["name"] for sb in out["self_buy"]]
+            ctx["shop_min"] = constraints.get("self_shop_min", 0)
+            ctx["delivery_note"] = (
+                f"퇴근길에 직접 샀다 — 들른 시간 {ctx['shop_min']}분(가정)"
+                if constraints.get("preorder") else
+                f"집에 와서 직접 다녀왔다 — {ctx['shop_min']}분(가정)")
         ctx["order_krw"] = out["total_krw"]
         ctx["order_eta_min"] = eta
         if out["auto_ordered"]:
@@ -1124,7 +1177,7 @@ def build_tasks(constraints: dict) -> list:
         """귀가부터 음식이 될 때까지(분). 식사까지 지표와 같은 식이다."""
         if ctx.get("cook_min") is None:
             return None
-        return (ctx.get("wait_for_delivery_min", 0)
+        return (ctx.get("wait_for_delivery_min", 0) + ctx.get("shop_min", 0)
                 + (0 if ctx.get("decided_before_home") else
                    FIXED_MIN["보관 확인"] + FIXED_MIN["메뉴 결정"])
                 + FIXED_MIN["준비"] + ctx["cook_min"])
@@ -1234,7 +1287,8 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             # 선제 주문이면 재고 확인·메뉴 결정은 **퇴근길에 끝났다** — 집에서
             # 쓰는 시간에 넣지 않는다. 전에는 그것까지 집에서 한 것으로 셌다.
             before_home = ctx.get("decided_before_home")
-            spent = (ctx.get("wait_for_delivery_min", 0)
+            # 직접 장보기로 들른 시간도 식사를 그만큼 늦춘다
+            spent = (ctx.get("wait_for_delivery_min", 0) + ctx.get("shop_min", 0)
                      + (0 if before_home else
                         FIXED_MIN["보관 확인"] + FIXED_MIN["메뉴 결정"])
                      + FIXED_MIN["준비"] + ctx["cook_min"])
@@ -1257,6 +1311,14 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["용량 초과"] = " / ".join(ctx["overfill_warn"])
         if ctx.get("approved_after_ask"):
             metrics["확인 후 승인"] = ctx["approved_after_ask"]
+        # 조건부 판단은 결과가 없어도 남긴다(2026-09-25) — 어느 방식으로 샀는지
+        if ctx.get("order_mode"):
+            metrics["주문 방식"] = {"auto": "자동(되는 것은 주문)",
+                                "ask": "매번 확인",
+                                "self": "직접 장보기"}.get(ctx["order_mode"],
+                                                          ctx["order_mode"])
+        if ctx.get("self_buy"):
+            metrics["직접 살 것"] = ctx["self_buy"]
         if ctx.get("overshoot") is not None:
             metrics["목표와의 차이"] = ctx["overshoot"]
         if ctx.get("menu_from"):

@@ -164,6 +164,11 @@ def reset(fridge_items=None, seed: int = 7, keep_records: bool = False):
     COOKER.temp_c = 20.0
     COOKER.power = 0
     COOKER.log.clear()
+    # **회차 편차 끄기도 되돌린다.** 상수는 아니지만 결과를 바꾸는 상태다.
+    # check_consistency 의 시간 스텝 검사가 deterministic=True 로 두고 돌려주지
+    # 않아, 같은 프로세스의 뒤 실행이 편차 없는 세계에서 돌았다(맞벌이 식사까지
+    # 11.8 → 11.7분). 2026-09-30 에 새 표 대조 검사가 이것을 드러냈다.
+    COOKER.deterministic = False
     # **물리 상수도 되돌린다.** 이 함수의 목적이 "매번 같은 출발점" 인데,
     # 상수는 손대지 않고 있었다. COOKER 는 모듈 전역 객체 하나를 계속
     # 재사용하므로, 시험이나 실험이 상수를 바꾼 채 두면 그 뒤 모든 실행이

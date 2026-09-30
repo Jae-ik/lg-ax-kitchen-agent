@@ -43,7 +43,10 @@ class SituationReadSkill(Skill):
         "terms": "dict | None  이 도메인의 말 — amount(양)·finish(마무리)·"
                  "finish_course(마무리 코스). 주입하지 않으면 중립어를 쓴다. "
                  "판단 로직은 도메인과 무관하고 **근거 문장만** 이 말을 쓴다",
+        "self_min": "dict | None  고객이 직접 할 때 드는 분 — on_way(오는 길에 "
+                    "들를 때) · from_home(집에서 다녀올 때). order_mode 가 self 일 때 쓴다",
     }
+    ORDER_MODES = ("auto", "ask", "self")
     reusable_for = ["주방(보관·조리·세척)", "세탁·의류관리", "청소 루틴", "공조 운전"]
     provides = ("friction", "constraints")
 
@@ -61,7 +64,7 @@ class SituationReadSkill(Skill):
                      "finish_start": "마무리 시작"}
 
     def run(self, persona: dict, stage_costs: dict, terms: dict | None = None,
-            **_) -> SkillResult:
+            self_min: dict | None = None, **_) -> SkillResult:
         T = dict(self.NEUTRAL_TERMS)
         T.update(terms or {})
         need_min = sum(stage_costs.values())
@@ -73,9 +76,33 @@ class SituationReadSkill(Skill):
 
         constraints, friction = {}, []
 
+        # 주문 방식은 **고객의 선호**다(한 번 정해 두고, 그날 말로 바꿀 수 있다).
+        # 정해 두지 않았으면 묻는 쪽이다 — 모를 때의 기본값은 멈춤이다.
+        mode = persona.get("order_mode")
+        if mode not in self.ORDER_MODES:
+            ev.append("주문 방식을 정해 두지 않았다 → 매번 묻고 산다(ask)"
+                      if mode is None else f"모르는 주문 방식 {mode!r} → ask")
+            mode = "ask"
+        else:
+            ev.append(f"주문 방식 {mode} — 고객이 정해 둔 선호")
+        constraints["order_mode"] = mode
+        if persona.get("auto_limit_krw") is not None:
+            constraints["auto_limit_krw"] = persona["auto_limit_krw"]
+
         # 퇴근 시각과 이동 시간을 알면 '집에 없는 동안' 을 쓸 수 있다.
         # 배송이 이동 시간 안에 끝나면 귀가 시점에 재료가 도착해 있다.
-        if commute and commute >= buy_min:
+        # 직접 장보기면 배송이 아니라 **사람이 들르는 시간**이 든다 — 오는 길에
+        # 들르면 그만큼 늦게 오고, 집에서 다녀오면 왕복이 든다.
+        if mode == "self":
+            sm = self_min or {}
+            constraints["preorder"] = bool(commute)
+            extra = sm.get("on_way" if commute else "from_home", 0)
+            constraints["self_shop_min"] = extra
+            need_at_home = need_min - buy_min + extra
+            ev.append(f"직접 장보기 — " + (f"퇴근길에 살 것 목록을 받고 들른다 (+{extra}분)"
+                                          if commute else
+                                          f"집에 와서 다녀온다 (+{extra}분)"))
+        elif commute and commute >= buy_min:
             constraints["preorder"] = True
             need_at_home = need_min - buy_min
             ev.append(f"퇴근~귀가 {commute}분 ≥ 배송 {buy_min}분 → "
@@ -83,6 +110,10 @@ class SituationReadSkill(Skill):
         else:
             constraints["preorder"] = False
             need_at_home = need_min
+
+        # 퇴근을 정해진 시각이 아니라 **알림(메시지)** 으로 아는 가구가 있다
+        # (야근이 잦으면 시각이 매일 다르다). 장면 문구만 달라진다.
+        constraints["leave_source"] = persona.get("leave_source", "schedule")
 
         # 귀가 후 시간으로 감당되지 않으면 조달을 뺀다
         if budget < need_at_home:

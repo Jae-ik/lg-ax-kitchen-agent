@@ -151,6 +151,40 @@ def c5():
     return "\n".join(bad)
 
 
+@check("README 의 주문 방식 표가 실제 실행과 같은가")
+def c5m():
+    """주문 방식 × 퇴근 정보 표(9/30). 새 표를 넣으면 대조하는 줄도 함께
+    넣는다(2026-09-29 규칙) — 들르는 시간 가정을 바꾸면 이 표가 낡는다."""
+    import mode_sensitivity as ms
+    doc = io.open("README.md", encoding="utf-8").read().splitlines()
+    labels = {"p1_야근": "야근 1인", "p2_맞벌이": "맞벌이 2인",
+              "p3_알레르기": "알레르기 4인", "p4_퇴근길": "퇴근길 1인"}
+    i = next((k for k, l in enumerate(doc) if l.startswith("| 가구 | 퇴근 | auto |")), None)
+    if i is None:
+        return "README 에 주문 방식 표가 없다"
+    rows, cur = {}, None
+    for l in doc[i + 2:]:
+        if not l.startswith("|"):
+            break
+        cells = [c.strip() for c in l.strip().strip("|").split("|")]
+        cur = cells[0] or cur
+        rows[(cur, cells[1])] = cells[2:5]
+    bad = []
+    for pid, label in labels.items():
+        for leave, word in ((True, "앎"), (False, "모름")):
+            got = rows.get((label, word)) or rows.get((label, word + "(알림)"))
+            if got is None:
+                bad.append(f"{label}·{word} 줄이 없다")
+                continue
+            for mode, cell in zip(ms.MODES, got):
+                r = ms.run_one(pid, mode, leave)
+                want = ("메뉴 못 정함" if r["meal_min"] is None
+                        else f"{r['meal_min']} · {r['touches']}")
+                if not cell.startswith(want):
+                    bad.append(f"{label}·{word}·{mode}: 실행 '{want}' 인데 README '{cell}'")
+    return "\n".join(bad)
+
+
 @check("문서에 적힌 기기 측정값이 variance.json 과 같은가")
 def c5b():
     """c5 는 **페르소나별 가열 시간**만 본다. 그래서 건조기 수치가 낡은 것을

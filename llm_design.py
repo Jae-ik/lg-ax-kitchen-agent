@@ -77,8 +77,15 @@ def _persona_text(persona: dict, constraints: dict) -> str:
             f"쓸 수 있는 시간 {constraints.get('time_budget_min')}분"]
     if constraints.get("avoid"):
         bits.append(f"못 먹는 것 {', '.join(constraints['avoid'])}")
+    mode = constraints.get("order_mode")
+    if mode:
+        bits.append({"auto": "주문 방식: 되는 것은 자동 주문",
+                     "ask": "주문 방식: 매번 묻고 산다",
+                     "self": "주문 방식: 주문하지 않고 직접 산다"}.get(mode, ""))
     if constraints.get("preorder"):
-        bits.append(f"퇴근 {persona.get('leave_office')} — 집에 오는 동안 주문할 수 있다")
+        bits.append(f"퇴근 {persona.get('leave_office')} — "
+                    + ("오는 길에 살 것 목록을 받아 들를 수 있다" if mode == "self"
+                       else "집에 오는 동안 주문할 수 있다"))
     if constraints.get("skip_procurement"):
         bits.append("시간이 모자라 장을 볼 수 없다")
     if constraints.get("finish_cleanup"):
