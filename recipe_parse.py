@@ -102,18 +102,44 @@ def _split_items(text: str) -> list[str]:
     return items
 
 
+def parse_water(text: str) -> float:
+    """레시피에 적힌 **물**(g)의 합. 재료 목록에는 넣지 않는다 — 수돗물은 재고가 아니다.
+
+    전엔 '물' 을 JUNK 로 버려, 물이 적힌 12건(끓이기 10건)에서 레시피의 물이 사라지고
+    계량이 "국물을 남길 최소량" 만 부었다(2026-10-01, audit_recipes 에서 드러남).
+    """
+    w = 0.0
+    for seg in _split_items(text):
+        seg = _unparen(seg.strip().lstrip("●·•[]-—").strip())
+        m = P_PAREN.search(seg) or P_PLAIN.search(seg)
+        if m and clean(m.group(1)) in WATER_LIKE:
+            w += float(m.group(2))
+    return round(w, 2)
+
+
+# 물로 내는 국물 — 수돗물로 채우는 액체로 본다(재료로 사지 않는다). '육수 200g' 이
+# 재료로 잡혀 장보기 대상이 됐다(10/1). 사 오는 "사골육수" 같은 제품은 여기 없다.
+WATER_LIKE = {"물", "육수", "멸치육수", "다시마육수", "채수", "맹물"}
+
+
+def _unparen(seg: str) -> str:
+    """이름 안의 **숫자 없는** 괄호를 뗀다 — "오렌지(껍질) 40g" 가 통째로 빠졌다(10/1).
+    숫자가 든 괄호("닭고기(가슴살, 120g)", "(1큰술)")는 수량이라 그대로 둔다."""
+    return re.sub(r"\(\s*[^()\d]*\)", "", seg)
+
+
 def parse_ingredients(text: str) -> list[dict]:
     """재료 문자열 → [{name, qty_g}] . 순서는 원문 순서를 지킨다."""
     out, seen = [], set()
     for seg in _split_items(text):
-        seg = seg.strip().lstrip("●·•[]-—").strip()
+        seg = _unparen(seg.strip().lstrip("●·•[]-—").strip())
         if not seg:
             continue
         m = P_PAREN.search(seg) or P_PLAIN.search(seg)
         if not m:
             continue
         name, qty = clean(m.group(1)), float(m.group(2))
-        if name in JUNK or len(name) > 12:
+        if name in JUNK or name in WATER_LIKE or len(name) > 12:
             continue
         if name in seen:
             # 같은 재료가 두 번 나오면 **합친다.** 전에는 뒤엣것을 버려서

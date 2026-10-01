@@ -176,6 +176,20 @@ def c5g():
     return "\n".join(bad)
 
 
+@check("README 의 자료 선별 숫자(알레르기·나트륨 제외·후보)가 실행과 같은가")
+def c5r():
+    import json
+    import re as _re
+    rows = {r["persona"]: r for r in json.load(io.open("scenarios.json", encoding="utf-8"))}
+    sel = str(rows["p3_알레르기"]["verify"]["metrics"].get("자료 선별", ""))
+    m = _re.search(r"알레르기 (\d+)건 · 나트륨 (\d+)건 제외 → 후보 (\d+)건", sel)
+    if not m:
+        return f"자료 선별 지표를 읽지 못했다: {sel}"
+    want = f"알레르기 {m.group(1)}건·나트륨 {m.group(2)}건 걸러 {m.group(3)}건"
+    doc = io.open("README.md", encoding="utf-8").read()
+    return "" if want in doc else f"README 에 '{want}' 가 없다 (실행: {sel[:60]})"
+
+
 @check("README 의 '장부가 날을 넘긴다' 표가 실제 실행과 같은가")
 def c5d():
     import json

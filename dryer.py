@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 import copy
+import math
 import random
 from dataclasses import dataclass, field
 
@@ -30,11 +31,18 @@ class Dryer:
     log: list = field(default_factory=list)
 
     def start(self, moisture: float, power: int = 2):
+        # 함수율은 0~1 이다. 있을 수 없는 값은 **조용히 고치지 않고 거부한다** —
+        # NaN 은 max(0, nan) 으로 0(다 말랐다)이 돼, 모르는 상태를 "건조 끝" 으로
+        # 봤다. 화력은 조리기처럼 0~5 로 묶는다 — 9 를 받아 드럼이 124도가 됐다
+        # (옷감이 상하는 온도). (2026-10-01 극단값 격자)
+        m = float(moisture)
+        if not (math.isfinite(m) and 0.0 <= m <= 1.0):
+            raise ValueError(f"함수율 {moisture!r} 은 0~1 이 아니다 — 측정을 다시 해야 한다")
         self.running = True
         self.elapsed_min = 0.0
-        self.moisture = moisture
+        self.moisture = m
         self.drum_temp_c = 22.0
-        self.power = power
+        self.power = max(0, min(5, int(power)))
         self.log = [(0.0, moisture)]
 
     def tick(self, minutes: float = 1.0):

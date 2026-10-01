@@ -452,6 +452,7 @@ class Cooker:
     LID_EVAP: float = 0.15            # 뚜껑을 덮으면 증발한 물이 맺혀 돌아온다
     LID_OVERFLOW: float = 1.6         # 뚜껑을 덮으면 거품이 갇혀 더 잘 넘친다
     SKIM_SOLID: float = 0.8           # 걷어낸 거품 중 고형분(단백질·기름) 비율
+    SKIM_MAX_SHARE: float = 0.10   # 한 번에 걷는 양의 상한(자유 수분 대비, 가정)
     SURF_EVAP: float = 0.02           # 끓지 않을 때 표면 증발 g/(K·분)
     # 불을 끄고 상에 올리기까지. 이 사이에도 물은 날아가므로 **기록에 남길
     # 값은 이 시점의 것**이다. 3분은 가정이며, 실제로는 가구마다 다르다.
@@ -490,6 +491,15 @@ class Cooker:
         """
         return max(0.0, self.mass_g - self.solid_g - self.absorbed_g)
 
+    @staticmethod
+    def _qty_ok(grams) -> bool:
+        """양이 **유한한 양수**인가. `grams <= 0` 만 보면 NaN 이 통과해 질량 전체가
+        NaN 이 됐다(2026-10-01 극단값 격자)."""
+        try:
+            return math.isfinite(float(grams)) and float(grams) > 0
+        except (TypeError, ValueError):
+            return False
+
     def _set_temp(self, t: float):
         """온도를 바꾸는 **유일한 자리.** 최고 온도를 함께 갱신한다.
 
@@ -499,14 +509,19 @@ class Cooker:
         (2026-09-26 "같은 물리를 두 곳에서 다르게 다뤘다" 와 같은 부류라
          아예 한 자리로 모은다.)
         """
+        # 물을 넣고 끓이는 냄비다 — 섞인 온도가 끓는점을 넘을 수 없다(300도 물을
+        # 받아 냄비가 66.7도가 됐다). 언 재료(-25도)까지는 받는다.
+        t = max(-25.0, min(100.0, t))
         self.temp_c = t
         self.peak_temp_c = max(self.peak_temp_c, t)
 
     def skim(self, grams: float, what: str = "거품"):
         """거품·기름을 걷어낸다. 질량이 주는데 이것은 증발이 아니다."""
-        if not self.running or grams <= 0:
+        if not self.running or not self._qty_ok(grams):
             return None
-        take = min(grams, max(0.0, self.mass_g - self.solid_g))
+        # 걷는 것은 **떠오른 거품·기름**이다. 한 번에 자유 수분의 10%(가정)까지 —
+        # 10,000g 을 걸으라 하면 국물을 통째로 퍼내 질량 0 이 됐다.
+        take = min(grams, max(0.0, self.mass_g - self.solid_g) * self.SKIM_MAX_SHARE)
         self.mass_g -= take
         self.skimmed_g += take
         # 걷어내는 것은 **떠오른 단백질·기름**이지 국물이 아니다.
@@ -527,8 +542,9 @@ class Cooker:
         묽어진다. 그래서 얼마나 부었는지를 함께 남겨, 사용자가 판단할 수
         있게 한다. 졸임 비율의 분모(총 투입량)는 건드리지 않는다.
         """
-        if not self.running or grams <= 0:
+        if not self.running or not self._qty_ok(grams):
             return None
+        temp_c = max(0.0, min(100.0, temp_c))        # 물은 0~100도다
         # 찬물을 부으면 **온도가 떨어진다.** 재료를 넣을 때는 이 계산을
         # 하면서 물만 빠뜨리고 있었다 — 같은 물리인데 한쪽만 구현돼 있었다.
         before_t = self.temp_c
@@ -536,9 +552,14 @@ class Cooker:
         self._set_temp((self.mass_g * self.temp_c + grams * temp_c) / total)
         self.mass_g = total
         self.watered_g += grams
+        # 재료 넣기는 넘침을 알리는데 물 붓기는 안 알렸다 — 같은 일이다(10/1)
+        over = (self.mass_g / self.capacity_g) if self.capacity_g else 0.0
         return {"grams": round(grams, 1), "mass_g": round(self.mass_g, 1),
                 "temp_drop_c": round(before_t - self.temp_c, 1),
-                "dilution": round(self.watered_g / max(1.0, self.mass_g), 4)}
+                "dilution": round(self.watered_g / max(1.0, self.mass_g), 4),
+                "fill_ratio": round(over, 3), "overfilled": over > 1.0,
+                "warning": (f"물을 부으면 냄비 용량의 {over:.0%} — 넘친다"
+                            if over > 1.0 else None)}
 
     def set_lid(self, closed: bool):
         """뚜껑. 덮으면 빨리 끓고 증발은 거의 없다 — 졸이려면 열어야 한다."""
@@ -574,7 +595,9 @@ class Cooker:
         # 출발 온도가 20도를 넘을 수도 있으므로 최고 온도도 함께 맞춘다.
         self.peak_temp_c = start_temp_c
         self._set_temp(start_temp_c)
-        self.power = power
+        # 화력도 set_power 와 같은 범위(0~5)로 묶는다 — start(power=9) 는 상한을
+        # 거치지 않고 9 로 남았다(10/1 극단값 격자)
+        self.power = max(0, min(5, int(power)))
         self.soil = 0.0
         self.soil_stir_saved = 0.0
         self.added_g = 0.0
@@ -583,7 +606,8 @@ class Cooker:
         self.watered_g = 0.0
         self.stir_since_min = 0.0
         self.cook_units = 0.0
-        self.peak_temp_c = 20.0
+        # (여기서 최고 온도를 20 으로 덮어써, 95도 국물을 데우면 최고 온도가 80도대로
+        #  기록됐다 — 위에서 출발 온도로 맞춘 것을 지웠다. 10/1 극단값 격자)
         self.log = [(0.0, self.mass_g, self.temp_c)]
 
     def tick(self, minutes: float = 1.0):
@@ -787,8 +811,9 @@ class Cooker:
           2) 온도가 **떨어진다** — 찬 재료가 열을 가져간다. 다시 끓기까지
              걸리는 시간이 실제 조리 시간의 큰 몫이다.
         """
-        if not self.running or grams <= 0:
+        if not self.running or not self._qty_ok(grams):
             return None
+        temp_c = max(-25.0, min(100.0, temp_c))      # 언 재료 ~ 끓는 것
         before_t = self.temp_c
         # 섞인 뒤 온도 = 질량가중 평균 (비열은 같다고 본다 — 물 기준 근사)
         total = self.mass_g + grams

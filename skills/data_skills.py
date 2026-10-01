@@ -54,8 +54,12 @@ class RecipeSourceSkill(Skill):
                 wrong_way.append(r["menu"])
                 continue
             na = r.get("sodium_mg")
-            if max_sodium_mg is not None and na is not None and na > max_sodium_mg:
-                over_na.append({"menu": r["menu"], "sodium_mg": na})
+            # 저염이 필요한 가구에 **모르는 나트륨을 통과시키지 않는다.** 전엔
+            # `na is not None and na > 상한` 이라 값이 없거나 원본 영양값이 앞뒤가
+            # 안 맞는(열량과 영양소가 5배 어긋나는) 레시피가 그대로 통과했다(10/1).
+            unsure = na is None or r.get("nutrition_ok") is False
+            if max_sodium_mg is not None and (unsure or na > max_sodium_mg):
+                over_na.append({"menu": r["menu"], "sodium_mg": na, "unsure": unsure})
                 continue
             kept.append(r)
 
@@ -70,7 +74,8 @@ class RecipeSourceSkill(Skill):
         if max_sodium_mg is not None:
             ev.append(f"나트륨 {max_sodium_mg:.0f}mg 초과 {len(over_na)}건 제외")
             for o in over_na[:3]:
-                ev.append(f"  · {o['menu']} — {o['sodium_mg']:.0f}mg")
+                ev.append(f"  · {o['menu']} — " + ("나트륨 값을 믿을 수 없다" if o.get("unsure")
+                                                    else f"{o['sodium_mg']:.0f}mg"))
         ev.append(f"후보 {len(kept)}건 확정 (적재 {len(pool)}건 중)")
 
         return SkillResult(bool(kept), {

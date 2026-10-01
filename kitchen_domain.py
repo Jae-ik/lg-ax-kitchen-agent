@@ -250,11 +250,24 @@ def load_recipes() -> dict:
     # 수집할 때의 파서로 풀어 둔 것이라, 그 뒤 고친 파싱(간장→장·생강→강
     # 방지, 소제목 떼기, 표기 통일)이 파이프라인에 **한 번도 닿지 않았다.**
     # 파싱 함수 시험은 통과했는데 파이프라인은 옛 결과를 읽고 있었다.
-    from recipe_parse import parse_ingredients
+    from recipe_parse import parse_ingredients, parse_water
     for r in d.get("recipes", []):
         if r.get("parts_raw"):
             r["ingredients"] = parse_ingredients(r["parts_raw"])
+            r["water_g"] = parse_water(r["parts_raw"])
+        r["nutrition_ok"] = nutrition_ok(r)
     return d
+
+
+def nutrition_ok(r: dict) -> bool:
+    """원본 영양값을 믿을 수 있는가. 열량 ≈ 4·단백질 + 4·탄수화물 + 9·지방(±40%, 가정)이고
+    범위 안이어야 한다. 원본에 "탄수화물 805g"·"단백질 242g" 이나, 열량과 영양소가
+    5배 어긋나는 찌개 10여 건이 있었다 — 그런 행의 **나트륨도 믿을 근거가 없다**(10/1)."""
+    k, p, c, f, na = (r.get(x) for x in ("kcal", "protein_g", "carb_g", "fat_g", "sodium_mg"))
+    if None in (k, p, c, f, na) or not k:
+        return False
+    est = 4 * p + 4 * c + 9 * f
+    return 0.6 <= est / k <= 1.4 and 10 <= k <= 2000 and 0 <= na <= 5000
 
 
 def recipe_to_record(r: dict) -> dict:
@@ -265,10 +278,13 @@ def recipe_to_record(r: dict) -> dict:
     """
     ratio, soil = METHOD_DEFAULT.get(r.get("method"), METHOD_DEFAULT["기타"])
     total = sum(i["qty_g"] for i in r["ingredients"])
+    # 레시피의 물은 처음 질량에 든다 — 계량이 목록에 없는 나머지를 수돗물로 채운다
+    water = r.get("water_g") or 0
     return {"record_id": f"pub_{r['recipe_id']}", "menu": r["menu"],
             "method": r.get("method"), "category": r.get("category"),
             "saved_by": "공개 레시피", "ingredients": r["ingredients"],
-            "initial_mass_g": round(total), "target_mass_ratio": ratio,
+            "recipe_water_g": water, "nutrition_ok": r.get("nutrition_ok"),
+            "initial_mass_g": round(total + water), "target_mass_ratio": ratio,
             "cook_minutes_observed": None, "soil_score": soil,
             "satisfaction": 0, "estimated": True,
             "sodium_mg": r.get("sodium_mg"), "kcal": r.get("kcal")}
@@ -294,8 +310,19 @@ ORDER_CAP_KRW = 30000
 DEVICE_METHODS = {"끓이기"}
 
 
+# 원본 분류가 '끓이기' 여도 이름이 냄비에서 졸이는 요리가 아니라고 말하는 것(가정)
+# — "소고기리조또롤"·"크림소스치킨롤" 이 끓이기로 분류돼 냄비에서 졸여졌다(10/1)
+NAME_NOT_POT = ("롤", "말이", "튀김", "구이", "샐러드", "주스", "스무디", "쌈")
+
+
 def fits_device(rec: dict):
     m = rec.get("method")
+    menu = rec.get("menu") or ""
+    if m in DEVICE_METHODS and str(rec.get("record_id", "")).startswith("pub_"):
+        hit = [w for w in NAME_NOT_POT if w in menu]
+        if hit:
+            return (f"'{menu}' 는 끓이기로 분류됐지만 이름({hit[0]})이 냄비에서 졸이는 "
+                    f"요리가 아니다 — 조리기 후보에서 뺀다")
     if m is None or m in DEVICE_METHODS:
         return None
     return f"이 조리기로 하지 않는 조리법({m}) — 냄비에서 끓이는 것만 다룬다"
