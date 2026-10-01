@@ -93,7 +93,8 @@ PROMPT = """사용자가 한국어로 말한 상황에서 아래 항목을 뽑�
   next_morning_rush  bool     내일 아침에 여유가 없는가
   goal_hint          str      한 줄 요약
   friction_reported  [str]    사용자가 말한 불편
-  fridge             [{name, qty_g, stored_days, shelf_life_days}]
+  fridge             [{name, qty_g, stored_days, shelf_life_days}]  지금 **있는** 것만.
+                     없다·다 썼다·떨어졌다고 한 재료는 넣지 마라
   order_mode         "auto"|"ask"|"self"  오늘 장보기를 어떻게 할지 — 알아서
                      주문(auto) · 묻고 사기(ask) · 직접 사 가기(self). 말하지
                      않았으면 넣지 마라
@@ -314,13 +315,9 @@ def rule_understand(text: str, now: str | None = None) -> dict:
         got["fridge"] = []
         why.append("재고가 비었다고 읽음")
     else:
-        chunks = re.findall(r"[가-힣]+", text)
-        found = []
-        for f in _FOOD:
-            if f in avoid:
-                continue                    # 기피 재료는 재고로 넣지 않는다
-            if any(c == f or (len(f) >= 2 and f in c) for c in chunks):
-                found.append(f)
+        found, gone = _foods_in(text, avoid)
+        if gone:
+            why.append(f"없다고 읽음: {', '.join(gone)}")
         if found:
             got["fridge"] = [{"name": f} for f in found]
             why.append(f"재료로 읽음: {', '.join(found)} (양은 가정, 보관일은 모름)")
@@ -347,6 +344,56 @@ def rule_understand(text: str, now: str | None = None) -> dict:
     got["goal_hint"] = text.strip()[:40]
     got["friction_reported"] = _friction_from(text)
     return {"fields": got, "read": why, "by": "규칙"}
+
+
+_NEG = r"없|다\s*(썼|먹었|떨어)|떨어졌|안\s*남|버렸|못\s*샀"
+_JOIN = r"^\s*(랑|이랑|하고|과|와|,)?\s*$"
+
+
+def _foods_in(text: str, avoid: list) -> tuple:
+    """말에서 **있는** 재료와 **없다고 한** 재료를 가른다.
+
+    전에는 이름이 나오기만 하면 있다고 읽었다 — "두부 없어 배추만 있어" 에서
+    두부가, "새우는 없어" 에서 새우가 재고가 됐다(2026-10-01). 재료마다 바로 뒤
+    (다음 재료나 '있' 이 나오기 전까지)에 없음·다 씀·떨어짐이 있으면 없는 것이다.
+    "배추랑 두부 없어" 처럼 '랑' 으로만 이어지면 뒤 재료의 부정을 같이 받는다.
+    """
+    hits = []
+    for f in _FOOD:
+        if f in avoid:
+            continue                    # 기피 재료는 재고로 넣지 않는다
+        longer = [g for g in _FOOD if g != f and f in g]
+        for m in re.finditer(re.escape(f), text):
+            # 더 긴 재료 이름의 일부면 따로 읽지 않는다 — "닭고기" 안의 "고기"
+            if any(mm.start() <= m.start() and m.end() <= mm.end()
+                   for g in longer for mm in re.finditer(re.escape(g), text)):
+                continue
+            # 한 글자 이름(무)은 낱말일 때만 — "무척"·"나무" 가 아니다
+            if len(f) == 1:
+                before = text[m.start() - 1] if m.start() else " "
+                after = text[m.end():m.end() + 2]
+                if re.match(r"[가-힣]", before) or not re.match(
+                        r"(랑|이랑|하고|는|도|가|를|\s|,|\.|$)", after or "$"):
+                    continue
+            hits.append((m.start(), m.end(), f))
+    hits.sort()
+    neg = {}
+    for i in range(len(hits) - 1, -1, -1):          # 뒤에서부터 — '랑' 이 뒤를 따른다
+        st, en, f = hits[i]
+        nxt = hits[i + 1][0] if i + 1 < len(hits) else len(text)
+        seg = re.split(r"[.!?]", text[en:nxt])[0]
+        seg = seg.split("있")[0]
+        if re.search(_NEG, seg):
+            neg[i] = True
+        elif i + 1 < len(hits) and re.match(_JOIN, text[en:nxt]):
+            neg[i] = neg.get(i + 1, False)
+        else:
+            neg[i] = False
+    found, gone = [], []
+    for i, (_, _, f) in enumerate(hits):
+        (gone if neg[i] else found).append(f)
+    found = [f for f in dict.fromkeys(found) if f not in gone]
+    return found, list(dict.fromkeys(gone))
 
 
 def _friction_from(text: str) -> list:

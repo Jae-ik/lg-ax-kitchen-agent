@@ -849,6 +849,38 @@ def r3_early():
                 + f" · (장부인데 실제로 없음 → {'성립' if led['verified'] else '실패'})")
 
 
+@check("긴 재료 이름 안의 짧은 이름을 따로 읽지 않는다 — 닭고기 ≠ 닭고기 + 고기")
+def r4_food_overlap():
+    f = lambda t: [x["name"] for x in thinq.rule_understand(t)["fields"].get("fridge", [])]
+    a, b, c = f("닭고기랑 배추 있어"), f("닭고기랑 고기 있어"), f("고기 있어")
+    # 순서는 말한 순서다(2026-10-01 부터) — 무엇을 읽었는지만 본다
+    ok = set(a) == {"배추", "닭고기"} and len(a) == 2 and set(b) == {"닭고기", "고기"}         and c == ["고기"]
+    return ok, f"'닭고기랑 배추' → {a} · '닭고기랑 고기' → {b} · '고기' → {c}"
+
+
+@check("확인해도 넣은 날을 모르면 지어내지 않고, 집에서 묻는 날은 그 수고를 덜었다고 세지 않는다")
+def r5_nodate_home():
+    o = thinq.run("8시 도착. 냉장고에 닭고기랑 배추 있어", profile={"order_mode": "auto"})
+    r = o["result"]
+    m, sc = r["verify"]["metrics"], r["scenario"]
+    first = [b for b in sc["beats"] if b["user"] == "현관에 들어선다"][0]
+    ok = ("넣은 날 모름" in (m.get("재고 확인") or "") and m.get("넣은 날 모름")
+          and "냉장고를 열어" not in first["removes"])
+    return ok, f"{(m.get('넣은 날 모름') or '')[:30]}… · 첫 장면 덜어줌: {first['removes'][:12]}…"
+
+
+@check("없다고 말한 재료를 재고로 읽지 않는다 — '두부 없어 배추만 있어'")
+def r6_negated_food():
+    f = lambda t: sorted(x["name"] for x in thinq.rule_understand(t)["fields"].get("fridge", []))
+    cases = {"두부 없어 배추만 있어": ["배추"], "새우는 없어": [], "대파는 다 썼어": [],
+             "배추랑 두부 없어": [], "배추 있고 두부 없어": ["배추"],
+             "무랑 두부 있어": ["두부", "무"], "무척 피곤해. 두부 있어": ["두부"],
+             "나무젓가락만 있어": [], "계란 3개랑 우유 있어": ["계란", "우유"],
+             "닭고기랑 배추 있어": ["닭고기", "배추"]}
+    bad = {t: (f(t), w) for t, w in cases.items() if f(t) != w}
+    return not bad, f"{len(cases) - len(bad)}/{len(cases)}" + (f" 틀림 {bad}" if bad else "")
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

@@ -186,7 +186,9 @@ def confirm_stock(names: list) -> list:
         elif after:
             ch = [f"{k} {before.get(k)}→{after.get(k)}" for k in ("qty_g", "stored_days")
                   if before and before.get(k) != after.get(k)]
-            out.append(f"{n}: " + (", ".join(ch) if ch else "맞다"))
+            # 넣은 날을 물었는데 사람도 모르면 **지어내지 않는다** — 모른다고 남긴다
+            out.append(f"{n}: " + (", ".join(ch) if ch else "맞다")
+                       + (" (넣은 날 모름)" if after.get("stored_days") is None else ""))
             for x in _FRIDGE:
                 if x["name"] == n:
                     x["source"] = "confirmed"

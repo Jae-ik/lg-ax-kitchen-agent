@@ -361,6 +361,8 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
 
     # verified_by: 이 장면이 실제로 일어났는지 확인할 실행 스킬.
     mode = constraints.get("order_mode", "ask")
+    unsure = unsure_stock([dict(x, source=x.get("source", persona.get("stock_source", "told")))
+                           for x in persona.get("fridge") or []])
     by_msg = constraints.get("leave_source") == "message"
     by_loc = constraints.get("leave_source") == "location"
     if pre:
@@ -377,11 +379,12 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
         beats.append({
             "at": t0, "user": "현관에 들어선다",
             "system": "재고와 남은 시간을 읽고 오늘 할 수 있는 것을 정한다",
-            "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일",
+            # 집에서 재고를 사람에게 확인받는 날은 그 수고를 덜었다고 세지 않는다
+            # — 다음 장면에서 바로 그 일을 시키면서 덜었다고 셌다(2026-10-01).
+            "removes": (BACKGROUND_REMOVES if unsure
+                        else "냉장고를 열어 뭐가 남았는지 확인하는 일"),
             "verified_by": "inventory", "expect_metric": "메뉴"})
 
-    unsure = unsure_stock([dict(x, source=x.get("source", persona.get("stock_source", "told")))
-                           for x in persona.get("fridge") or []])
     if unsure:
         beats.append({
             "at": plus(lv, 1),
@@ -1410,6 +1413,12 @@ def make_executor(registry, on_step=None, seed_ctx=None):
         if sc:
             metrics["재고 확인"] = (f"{sc['where']} 1회 — {', '.join(sc['asked'])} 가 "
                                 f"있는지 물음 → {'; '.join(sc['answer'])}")
+            nodate = [a.split(":")[0] for a in sc["answer"] if "넣은 날 모름" in a]
+            if nodate:
+                # 확인을 해도 날짜를 모르면 상했는지 판단할 수 없다. 조리하는 사람이
+                # 재료를 손질할 때 보도록 알린다 — 판단은 사람 몫으로 남긴다.
+                metrics["넣은 날 모름"] = (f"{', '.join(nodate)} — 상했는지 판단하지 "
+                                       f"못했다. 손질할 때 냄새·색을 보라고 알린다")
         elif "stock_confirm" in ctx:
             metrics["재고 확인"] = "묻지 않음 — 확실하지 않은 필수 재료가 없다(장부·저울로 안다)"
         if ctx.get("delivery_note"):
