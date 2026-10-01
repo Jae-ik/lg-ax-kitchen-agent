@@ -387,6 +387,8 @@ class ProcureSkill(Skill):
                  "주입받는다. 없으면 **부분 일치**(새우 → 새우젓도 걸린다)",
         "auto_limit_krw": "int  1회 자동 주문 상한",
         "deadline_min": "int | None  이 시간 안에 도착해야 한다",
+        "need_g": "dict | None  품목별 필요량(g). 포장 단위로 올려 몇 개 살지 정한다",
+        "order_cap_krw": "int | None  이번 주문의 자동 주문 **합계** 상한. 넘는 것은 묻는다",
         "mode": "str | None  고객이 정해 둔 주문 방식 — auto(되는 것은 자동 "
                 "주문) · ask(매번 묻고 산다) · self(주문하지 않고 살 것 목록만). "
                 "모르면 ask",
@@ -399,7 +401,8 @@ class ProcureSkill(Skill):
     def run(self, missing: list, lookup, known_items: list | None = None,
             avoid: list | None = None, auto_limit_krw: int = 15000,
             deadline_min: int | None = None, mode: str | None = None,
-            match=None, **_) -> SkillResult:
+            match=None, need_g: dict | None = None,
+            order_cap_krw: int | None = None, **_) -> SkillResult:
         known = set(known_items or [])
         avoid = set(avoid or [])
         auto, ask, self_buy, ev = [], [], [], []
@@ -416,8 +419,25 @@ class ProcureSkill(Skill):
         if deadline_min is None:
             ev.append("도착 기한이 주어지지 않았다 — 배송 시간을 따지지 않는다")
 
+        # 제안(offer)은 dict 로도 객체로도 온다 — 루프 **앞에서** 정의한다
+        # (2026-10-01: 루프 중간에 두었더니 self 경로가 정의 전에 썼다)
+        def g(o, key, default=None):
+            if isinstance(o, dict):
+                return o.get(key, default)
+            return getattr(o, key, default)
+
+        auto_sum = 0
         for name in missing:
-            offers = lookup(name)
+            # 상점 조회가 실패해도 **전체가 멈추지 않는다** — 그 품목만 묻는다.
+            # 전에는 예외가 그대로 올라가 파이프라인이 죽었다(2026-10-01).
+            try:
+                offers = lookup(name)
+            except Exception as e:
+                ask.append({"name": name, "reason": f"상점 조회 실패({type(e).__name__})"})
+                ev.append(f"{name}: 상점 조회 실패 — {type(e).__name__}: {e} → 확인 요청")
+                continue
+            # 품절은 고를 수 없다. 어댑터가 거르지만 스킬도 한 번 더 본다
+            offers = [o for o in (offers or []) if g(o, "in_stock", True)]
             if not offers:
                 ask.append({"name": name, "reason": "취급하는 상점 없음"})
                 ev.append(f"{name}: 어느 상점에도 없음 → 확인 요청"); continue
@@ -434,7 +454,10 @@ class ProcureSkill(Skill):
             if mode == "self":
                 # 사람이 직접 산다 — 배송 시간·주문 가능 여부는 상관없다.
                 # 못 먹는 것은 위에서 이미 걸렀다(목록에도 넣지 않는다).
-                self_buy.append({"name": name})
+                pk = g(offers[0], "pack_g", 0) or 0
+                want = (need_g or {}).get(name)
+                self_buy.append({"name": name, "pack_g": pk,
+                                 "packs": max(1, -(-int(want) // pk)) if (pk and want) else 1})
                 ev.append(f"{name}: 직접 장보기 — 주문하지 않고 살 것 목록에 넣는다")
                 continue
 
@@ -444,10 +467,6 @@ class ProcureSkill(Skill):
             # 객체가 아니라 일반 타입을 주고받는다" 와 어긋나는 유일한
             # 자리였다. 다른 도메인에서 이 스킬을 쓰려면 같은 속성을 가진
             # 클래스를 만들어야 했다는 뜻이다.
-            def g(o, key, default=None):
-                if isinstance(o, dict):
-                    return o.get(key, default)
-                return getattr(o, key, default)
 
             # 제때 도착하는 것만 남기고, 그중 가장 싼 것을 고른다
             fit = [o for o in offers
@@ -471,6 +490,11 @@ class ProcureSkill(Skill):
                           f"→ 사용자가 직접 주문해야 한다")
                 continue
             best = min(orderable, key=lambda o: g(o, 'price_krw'))
+            # 몇 개 살지 — 필요량을 포장 단위로 올린다(모르면 1개)
+            pack = g(best, "pack_g", 0) or 0
+            want = (need_g or {}).get(name)
+            packs = max(1, -(-int(want) // pack)) if (pack and want) else 1
+            cost = g(best, 'price_krw') * packs
             ev.append(f"{name}: 상점 {len(offers)}곳 비교 → "
                       + " / ".join(f"{g(o, 'store')} {g(o, 'price_krw'):,}원 {g(o, 'delivery_min')}분"
                                    for o in offers))
@@ -478,16 +502,25 @@ class ProcureSkill(Skill):
             if name not in known:
                 ask.append({"name": name, "reason": "처음 구매하는 품목"})
                 ev.append(f"  {name}: 구매 이력 없음 → 확인 요청"); continue
-            if g(best, 'price_krw') > auto_limit_krw:
+            if cost > auto_limit_krw:
                 ask.append({"name": name,
-                            "reason": f"{g(best, 'price_krw'):,}원 > 상한 {auto_limit_krw:,}원"})
+                            "reason": f"{cost:,}원 > 상한 {auto_limit_krw:,}원"})
                 ev.append(f"  {name}: 금액 상한 초과 → 확인 요청"); continue
+            # **합계**도 본다. 전에는 품목마다만 봐서 14,000원 × 5 = 70,000원을
+            # 묻지 않고 샀다(2026-10-01).
+            if order_cap_krw is not None and auto_sum + cost > order_cap_krw:
+                ask.append({"name": name,
+                            "reason": f"이번 자동 주문 합계 {auto_sum + cost:,}원 > "
+                                      f"합계 상한 {order_cap_krw:,}원"})
+                ev.append(f"  {name}: 합계 상한 초과 → 확인 요청"); continue
             if mode == "ask":
                 ask.append({"name": name, "reason": "매번 묻고 사기로 한 주문 방식"})
                 ev.append(f"  {name}: 자동 주문할 수 있지만 고객이 매번 묻기로 했다 "
                           f"→ 확인 요청"); continue
 
-            auto.append({"name": name, "price_krw": g(best, "price_krw"),
+            auto_sum += cost
+            auto.append({"name": name, "price_krw": cost, "packs": packs,
+                         "pack_g": pack, "unit_price_krw": g(best, "price_krw"),
                          "store": g(best, "store"),
                          "delivery_min": g(best, "delivery_min"),
                          "source": g(best, "source")})

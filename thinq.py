@@ -123,7 +123,9 @@ def ask_claude(prompt: str) -> str:
     return "".join(b.text for b in msg.content if b.type == "text")
 
 
-def ask_claude_cli(prompt: str, timeout: int = 240) -> str:
+def ask_claude_cli(prompt: str, timeout: int = 90) -> str:
+    # (240초였다 — 한 번 실행에 LLM 을 4번 부르므로 퇴근길 메시지 하나가 최악
+    #  16분이 걸릴 수 있었다. 90초를 넘기면 규칙·틀로 돌아간다.)
     """설치된 `claude` 명령으로 부른다 — **API 키가 없어도 된다.**
 
     이 자리를 처음엔 비워 두고 "키가 없어 검증 못 함" 이라고 적었는데,
@@ -420,8 +422,21 @@ PROFILE_KEYS = ("order_mode", "auto_limit_krw",
                 "commute_min", "location_consent", "leave_window",
                 "location_dwell_min",
                 # 근거를 못 찾은 가정값 — 가구가 정하면 그것을 쓴다(prefs 로 넘어간다)
-                "eat_min", "shop_detour_min", "shop_trip_min")
-PREF_KEYS = ("eat_min", "shop_detour_min", "shop_trip_min")
+                "eat_min", "shop_detour_min", "shop_trip_min",
+                "order_cap_krw", "location_auto_order",
+                "avoid", "max_sodium_mg")
+PREF_KEYS = ("eat_min", "shop_detour_min", "shop_trip_min",
+             "order_cap_krw", "location_auto_order")
+# **안전 항목도 가구가 저장한다**(2026-10-01). 전에는 "말할 때마다 승인" 이라며
+# 저장을 막아, 하루 말하지 않으면 그날은 새우가 걸러지지 않았다. 저장한 것은
+# 이미 확인한 것이고, 그날 말은 **더할 수만** 있다 — 말하지 않았다고 풀리지 않는다.
+SAFETY_KEYS = ("avoid", "max_sodium_mg")
+# 돈·동의·가정값 설정은 **말로 바꾸지 않는다.** LLM 경로로 "이십만원까지 사"
+# 가 자동 주문 상한을, "위치 써도 돼" 가 위치 동의를 바꿨다(2026-10-01) —
+# 아이 말·잘못 들은 말·끼어든 문장으로 돈과 동의가 바뀐다. 설정에서만 바꾼다.
+SETTINGS_ONLY = ("auto_limit_krw", "location_consent", "leave_window",
+                 "location_dwell_min", "eat_min", "shop_detour_min", "shop_trip_min",
+                 "order_cap_krw", "location_auto_order")
 
 
 def understand(text: str, ask=None, profile: dict | None = None,
@@ -438,17 +453,40 @@ def understand(text: str, ask=None, profile: dict | None = None,
     if ask is None:
         got = rule_understand(text, now=now)
     else:
-        raw = ask(PROMPT.replace("{text}", text).replace("{now}", now or "모름"))
-        fields, why = _parse_json(raw)
-        got = {"fields": fields, "read": why, "by": "LLM"}
+        # 외부 LLM 에는 **이 일에 필요 없는 개인정보를 가려** 보낸다(전화·주소·
+        # 이메일·주민·카드번호). 전에는 말을 그대로 보냈다(2026-10-01).
+        try:
+            raw = ask(PROMPT.replace("{text}", redact(text)).replace("{now}", now or "모름"))
+            fields, why = _parse_json(raw)
+        except Exception as e:                     # LLM 이 죽어도 멈추지 않는다
+            fields, why = {}, [f"LLM 호출 실패({type(e).__name__})"]
+        if fields:
+            got = {"fields": fields, "read": why, "by": "LLM"}
+        else:
+            # 엉뚱한 답·실패면 **규칙으로 읽는다**. 전엔 기본값(19:00·재고 없음)
+            # 으로 조용히 진행했다.
+            got = rule_understand(text, now=now)
+            got["read"] = why + ["LLM 답을 쓸 수 없어 규칙으로 읽었다"] + got["read"]
+            got["by"] = "규칙(LLM 실패)"
 
     clean, rejected = _validate(got["fields"])
+    for k in SETTINGS_ONLY:
+        if k in clean:
+            clean.pop(k)
+            rejected.append(f"{k}: 설정은 말로 바꾸지 않는다 — 앱 설정에서 바꾼다")
     pref, pref_bad = _validate({k: v for k, v in (profile or {}).items()
                                 if k in PROFILE_KEYS})
     rejected += [f"선호 {b}" for b in pref_bad]
     rejected += [f"선호 {k}: 가구 선호로 두지 않는 항목이라 버렸다"
                  for k in (profile or {}) if k not in PROFILE_KEYS]
     persona = {**_DEFAULT, **pref, **clean}
+    # 안전 항목: 저장한 것 ∪ 그날 말. 말하지 않았다고 풀리지 않는다.
+    if pref.get("avoid") or clean.get("avoid"):
+        persona["avoid"] = list(dict.fromkeys((pref.get("avoid") or [])
+                                              + (clean.get("avoid") or [])))
+    if pref.get("max_sodium_mg") and clean.get("max_sodium_mg"):
+        persona["max_sodium_mg"] = min(pref["max_sodium_mg"], clean["max_sodium_mg"])
+    persona["goal_hint"] = redact(persona.get("goal_hint") or "")
     _leave_from(persona, clean, location, got["read"])
     prefs = {k: persona.pop(k) for k in PREF_KEYS if k in persona}
     if prefs:
@@ -537,6 +575,29 @@ def _leave_from(persona: dict, said: dict, location, read: list) -> None:
                     f"귀가 {persona['arrive_home']}")
 
 
+_PII = [
+    (r"(?<!\d)01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}(?!\d)", "[전화번호]"),
+    (r"(?<!\d)0\d{1,2}[-\s.]\d{3,4}[-\s.]\d{4}(?!\d)", "[전화번호]"),
+    (r"[\w.+-]+@[\w-]+\.[\w.]+", "[이메일]"),
+    (r"(?<!\d)\d{6}[-\s]?[1-4]\d{6}(?!\d)", "[주민번호]"),
+    (r"(?<!\d)(?:\d{4}[-\s]?){3}\d{4}(?!\d)", "[카드번호]"),
+    (r"(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)"
+     r"\S*\s+\S+(구|군|시)\s+\S+(로|길|동)\s*\d[\d-]*(번길\s*\d+)?", "[주소]"),
+    (r"(이름은|성함은|이름이)\s*\S+", r"\1 [이름]"),
+]
+
+
+def redact(text: str) -> str:
+    """외부 LLM 으로 보내기 전에 이 일에 필요 없는 개인정보를 가린다.
+
+    시간·재료·인원은 남긴다. 이름은 문맥 없이 알아보기 어려워 "이름은 ○○"
+    꼴만 가린다 — 완전하지 않다(남는 위험으로 README 에 적는다).
+    """
+    for pat, rep in _PII:
+        text = re.sub(pat, rep, text)
+    return text
+
+
 def _parse_json(raw: str):
     """LLM 답에서 JSON 을 꺼낸다. 앞뒤에 말이 붙어 와도 된다."""
     m = re.search(r"\{.*\}", raw or "", re.S)
@@ -576,6 +637,8 @@ def _validate(fields: dict):
         "location_consent": (bool, lambda v: True),
         "location_dwell_min": (int, lambda v: 0 <= v <= 30),
         "eat_min": (int, lambda v: 5 <= v <= 120),
+        "order_cap_krw": (int, lambda v: 0 <= v <= 500000),
+        "location_auto_order": (bool, lambda v: True),
         "shop_detour_min": (int, lambda v: 0 <= v <= 90),
         "shop_trip_min": (int, lambda v: 0 <= v <= 120),
         "leave_window": (list, lambda v: len(v) == 2
@@ -821,6 +884,10 @@ def run(text: str, ask=None, seed: int = 7, approve=None,
 
     pid = u["persona"]["id"]
     personas.PERSONAS[pid] = u["persona"]
+    # 처음 사는 것 등 확인이 필요한 주문은 **사람에게 묻는다.** approve 가 없으면
+    # 사지 않는다(승인 대기). 시연용 "동의 가정" 은 run_design 에만 있다.
+    def approve_purchase(items):
+        return bool(approve and approve({"purchase": list(items)}))
 
     buf = _io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -833,8 +900,13 @@ def run(text: str, ask=None, seed: int = 7, approve=None,
                 ask, KD.kitchen_capabilities, KD.kitchen_beats, fo,
                 human_only=KD.HUMAN_ONLY, claims=KD.CLAIMS,
                 conditional=KD.CONDITIONAL))
-        result = run_design.design_for(pid, Trace(), seed=seed,
-                                       beats_factory=factory)
+        try:
+            result = run_design.design_for(pid, Trace(), seed=seed,
+                                           beats_factory=factory,
+                                           approve_purchase=approve_purchase)
+        finally:
+            # 전역 표에 남기지 않는다 — 다음 실행·다른 가구와 섞이지 않게
+            personas.PERSONAS.pop(pid, None)
     e = explain(result, ask=ask)
     return {"understood": u, "result": result, "explained": e,
             "trace": buf.getvalue(), "stopped": False, "confirm": ask_user}

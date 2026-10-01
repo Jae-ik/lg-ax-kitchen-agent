@@ -283,7 +283,10 @@ CATALOG = store.BASE_PRICE          # 재고 반영·수량 산정에만 쓴다
 KNOWN_ITEMS = ["두부", "대파", "간장", "된장", "닭고기", "양파", "당근",
                "감자", "달걀", "배추", "애호박",
                "참기름", "식용유", "설탕", "소금", "고춧가루", "식초", "밀가루"]
-AUTO_LIMIT_KRW = 15000                                # 1회 자동 주문 상한
+AUTO_LIMIT_KRW = 15000                                # 1회 자동 주문 상한(품목당)
+# 한 번 주문의 자동 주문 **합계** 상한(가정, 2026-10-01). 넘는 것은 묻는다.
+# 가구가 prefs.order_cap_krw 로 바꾼다.
+ORDER_CAP_KRW = 30000
 
 # 이 조리기가 하는 조리법. 시뮬레이터(converge)는 **냄비에서 끓여 졸이는**
 # 물리만 다룬다 — 굽기·튀기기·찌기·무조리(샐러드·주스)는 온도·열전달이 달라
@@ -847,19 +850,37 @@ def build_tasks(constraints: dict) -> list:
         for n in ctx.get("pantry_refill", []):
             if n not in need:
                 need.append(n)
+        # 위치로 **추정한** 퇴근은 틀릴 수 있다(저녁 약속). 그 추정으로 돈을
+        # 쓰지 않는다 — 자동 주문 가구라도 이때는 묻고 산다. 가구가
+        # prefs.location_auto_order 를 켜면 그대로 자동이다(2026-10-01).
+        mode = constraints.get("order_mode")
+        prefs = constraints.get("prefs") or {}
+        if (constraints.get("leave_source") == "location" and mode == "auto"
+                and not prefs.get("location_auto_order")):
+            mode = "ask"
+            ctx["mode_note"] = "위치로 추정한 퇴근이라 자동 주문 대신 묻고 산다"
+        rec_g = {i["name"]: i["qty_g"] for i in ctx["record"].get("ingredients", [])}
         return {"missing": need,
+                "need_g": {n: rec_g.get(n) for n in need if rec_g.get(n)},
+                "order_cap_krw": prefs.get("order_cap_krw", ORDER_CAP_KRW),
                 "lookup": store.make_lookup(),
                 "known_items": KNOWN_ITEMS, "avoid": avoid,
                 "auto_limit_krw": constraints.get("auto_limit_krw", AUTO_LIMIT_KRW),
                 "deadline_min": constraints.get("budget_min"),
-                "mode": constraints.get("order_mode"),
+                "mode": mode,
                 # 메뉴와 같은 규칙으로 기피어를 본다(얇게→게 같은 오탐 제외)
                 "match": contains_any}
 
     def _procure_absorb(ctx, out):
-        def qty_for(name):
-            return next((i["qty_g"] for i in ctx["record"]["ingredients"]
-                         if i["name"] == name), 150)
+        def qty_for(name, packs=None, pack_g=None):
+            """산 양 = 포장 단위. 전엔 레시피 필요량만 넣어 남는 양을 장부가 몰랐다."""
+            need = next((i["qty_g"] for i in ctx["record"]["ingredients"]
+                         if i["name"] == name), None)
+            pk = pack_g if pack_g is not None else store.pack_of(name)
+            if not pk:
+                return need or 150
+            n = packs if packs else (max(1, -(-int(need) // pk)) if need else 1)
+            return n * pk
 
         # 주문한 것은 **도착해야** 쓸 수 있다. 예전에는 주문 즉시 재고에
         # 넣어서, "20분 뒤 도착" 이라 해놓고 두부 없이 조리를 시작했다.
@@ -867,13 +888,13 @@ def build_tasks(constraints: dict) -> list:
         # 실제 기기라면 도착 알림을 받고 시작해야 한다.
         eta = out.get("arrive_in_min", 0)
         for a in out["auto_ordered"]:
-            K.fridge_add(a["name"], qty_for(a["name"]))
+            K.fridge_add(a["name"], qty_for(a["name"], a.get("packs"), a.get("pack_g")))
         # 직접 장보기: 사람이 사 온다. 기다림은 없지만 **들른 시간**이 든다
         # (가정 — store.SHOP_DETOUR_MIN / SHOP_TRIP_MIN).
         ctx["order_mode"] = out.get("mode")
         if out.get("self_buy"):
             for sb in out["self_buy"]:
-                K.fridge_add(sb["name"], qty_for(sb["name"]))
+                K.fridge_add(sb["name"], qty_for(sb["name"], sb.get("packs"), sb.get("pack_g")))
             ctx["self_buy"] = [sb["name"] for sb in out["self_buy"]]
             ctx["shop_min"] = constraints.get("self_shop_min", 0)
             ctx["delivery_note"] = (
@@ -908,6 +929,23 @@ def build_tasks(constraints: dict) -> list:
         approved, late = [], []
         deadline = constraints.get("budget_min")
         pre = constraints.get("preorder")
+        # **승인은 사람이 한다.** 실제 사용 경로(thinq)는 승인 함수를 주입하고,
+        # 시연(run_design)만 "동의했다고 가정" 한다. 전에는 thinq 도 가정해서
+        # 실제 사용자에게 묻지 않고 돈을 썼다(2026-10-01).
+        approver = ctx.get("approve_purchase")
+        asking = [c["name"] for c in out["need_confirm"] if not c.get("safety")]
+        if approver is not None and asking:
+            try:
+                said = approver(asking)
+            except Exception:
+                said = False                       # 승인을 못 받으면 사지 않는다
+            yes = set(asking) if said is True else set(said or [])
+            ctx["approval"] = {"asked": asking, "approved": sorted(yes)}
+        else:
+            yes = set(asking)
+            if asking:
+                ctx["approval"] = {"asked": asking, "approved": sorted(yes),
+                                   "assumed": True}
         for c in out["need_confirm"]:
             name = c["name"]
             # 못 먹는 재료로 멈춘 것은 **승인을 가정하지 않는다.** 시연은
@@ -915,6 +953,9 @@ def build_tasks(constraints: dict) -> list:
             # 품목까지 재고에 넣고 있었다(사유를 보지 않았다).
             if c.get("safety"):
                 late.append(f"{name}(못 먹는 재료 — 승인을 가정하지 않는다)")
+                continue
+            if name not in yes:
+                late.append(f"{name}(승인 대기 — 사지 않았다)")
                 continue
             if name not in CATALOG:
                 continue
@@ -1380,6 +1421,12 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["용량 초과"] = " / ".join(ctx["overfill_warn"])
         if ctx.get("approved_after_ask"):
             metrics["확인 후 승인"] = ctx["approved_after_ask"]
+        ap = ctx.get("approval")
+        if ap:
+            metrics["승인"] = ("시연 — 사람이 동의했다고 가정했다" if ap.get("assumed")
+                             else f"물음 {ap['asked']} → 승인 {ap['approved']}")
+        if ctx.get("mode_note"):
+            metrics["주문 방식 조정"] = ctx["mode_note"]
         # 조건부 판단은 결과가 없어도 남긴다(2026-09-25) — 어느 방식으로 샀는지
         _mode = ctx.get("order_mode") or ctx.get("planned_order_mode")
         if _mode:

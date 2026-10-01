@@ -34,6 +34,7 @@ class Offer:
     # 조달 스킬이 제휴 여부를 모른 채 전부 자동 주문했다.
     can_order: bool = False
     source: str = "시뮬레이터"
+    pack_g: int = 0            # 한 개(포장)의 양. 0 이면 모른다
 
     def __repr__(self):
         return (f"{self.store} {self.item} {self.price_krw:,}원 "
@@ -65,7 +66,8 @@ class Store:
                      price_krw=int(round(base * self.price_factor / 10) * 10),
                      delivery_min=self.delivery_min,
                      in_stock=item not in self.out_of_stock,
-                     can_order=self.can_order, source=self.source)
+                     can_order=self.can_order, source=self.source,
+                     pack_g=pack_of(item))
 
 
 # 기준가 — KAMIS 같은 실제 가격원으로 교체할 자리다.
@@ -170,6 +172,32 @@ STORES = [
           out_of_stock=("미나리",)),
     Store("일반배송", delivery_min=2880, price_factor=0.95, catalog=BASE_PRICE),
 ]
+
+
+# ── 포장 단위 (2026-10-01) ────────────────────────────────────────────
+# 전에는 레시피에 필요한 양(두부 73g)만 산 것으로 냉장고에 넣었다. 두부는
+# 한 모로 온다 — 남는 227g 을 장부가 모르면 다음 날 "있는데 없다고 믿는"
+# 일이 생긴다(belief_gap E2). 규격은 **대표값 가정**이다(상점마다 다르다).
+PACK_G = {
+    "두부": 300, "연두부": 300, "순두부": 350, "대파": 500, "배추": 2000, "무": 1500,
+    "양파": 1000, "감자": 1000, "당근": 500, "애호박": 300, "시금치": 300, "오이": 300,
+    "미나리": 200, "표고버섯": 200, "콩나물": 300, "닭고기": 1000, "한우등심": 300,
+    "달걀": 600, "우유": 1000, "찹쌀": 1000, "참기름": 320, "들기름": 320,
+    "식용유": 900, "간장": 500, "된장": 500, "고추장": 500, "소금": 500, "설탕": 1000,
+    "고춧가루": 500, "식초": 500, "밀가루": 1000,
+}
+_PACK_BY_CAT = {"채소": 300, "버섯": 200, "과일": 500, "육류": 500, "해산물": 300,
+                "유제품": 200, "장·소스": 500, "곡물·면·떡": 500, "견과·씨앗": 200,
+                "허브·향신료": 50, "가공식품": 300}
+
+
+def pack_of(item: str) -> int:
+    if item in PACK_G:
+        return PACK_G[item]
+    for cat, names in _MORE.items():
+        if item in names.split():
+            return _PACK_BY_CAT[cat]
+    return 300                                   # 모르면 300g(가정)
 
 
 def make_lookup(stores=None):

@@ -200,7 +200,10 @@ def c9():
     "만들 수 있는 것이 없다" 로 멈췄다. 이제 만들되, 예산을 넘으면 넘는다고
     말해야 한다. (나) 다시 계획해도 정말 못 만드는 경우는 못 만든다고
     말해야 한다. '-로 정했습니다' 처럼 빈 값을 읽어 주면 안 된다."""
-    a = thinq.run("배추랑 두부만 있어. 9시 반 도착이고 30분 있어")
+    # 장보기를 넣어 다시 짜려면 사람이 산다고 승인해야 한다(10/1 부터 실제
+    # 경로는 승인 없이 사지 않는다) — 이 시험은 재계획 설명을 본다
+    a = thinq.run("배추랑 두부만 있어. 9시 반 도착이고 30분 있어",
+                  approve=lambda c: True)
     ta, va = a["explained"]["text"], a["result"]["verify"]
     ok_a = ("다시 계획" in ta and ("모자랍니다" in ta) == va.get("over_budget")
             and (va.get("over_budget") is False or not va["verified"]))
@@ -291,9 +294,11 @@ def d1():
                   "menu", [1]),
                  (5, "부를 때만 온다", "화력을 맞추고 다 되면 끈다",
                   "converge", [0]))
-    a = thinq.run("아무말", ask=lambda p: per)          # 설명도 같은 답 — 무관
+    # 두 판 모두 사람이 장보기를 승인한다 — 같은 계획에서 덮는 수만 비교한다
+    yes = lambda c: True
+    a = thinq.run("아무말", ask=lambda p: per, approve=yes)   # 설명도 같은 답 — 무관
     b = thinq.run("아무말",
-                  ask=lambda p: sc if "시나리오 설계자" in p else per)
+                  ask=lambda p: sc if "시나리오 설계자" in p else per, approve=yes)
     ca, cb = a["result"]["scenario"], b["result"]["scenario"]
     ok = ca["covered"] == 0 and cb["covered"] == 2
     return ok, f"틀 {ca['covered']}/{ca['total_friction']} → LLM {cb['covered']}/{cb['total_friction']}"
@@ -565,8 +570,8 @@ def m5():
 
 @check("정해 둔 선호를 쓰고, 그날 말이 있으면 그날 말이 이긴다")
 def m6():
-    """기본값 < 가구 선호 < 그날 말. 선호에 안전 항목(avoid)을 넣어도
-    받지 않는다 — 그것은 말할 때마다 승인을 거친다."""
+    """기본값 < 가구 선호 < 그날 말. 안전 항목(avoid)은 10/1 부터 **저장한다** —
+    말하지 않았다고 풀리면 안 된다. 잘못된 값(주문 방식 '가끔')만 버린다."""
     u0 = thinq.understand("7시 도착")
     u1 = thinq.understand("7시 도착", profile={"order_mode": "auto"})
     u2 = thinq.understand("7시 도착, 오늘은 내가 마트 들를게",
@@ -576,7 +581,7 @@ def m6():
     got = (u0["persona"].get("order_mode"), u1["persona"].get("order_mode"),
            u2["persona"].get("order_mode"), u3["persona"].get("order_mode"))
     ok = (got == (None, "auto", "self", None)
-          and u3["persona"]["avoid"] == [] and len(u3["rejected"]) == 2
+          and u3["persona"]["avoid"] == ["새우"] and len(u3["rejected"]) == 1
           and any("오늘은 self" in r for r in u2["read"]))
     return ok, (f"없음 {got[0]} · 선호 {got[1]} · 선호+그날 말 {got[2]} · "
                 f"잘못된 선호 {got[3]} (버림 {len(u3['rejected'])}건)")
@@ -642,7 +647,8 @@ def n4():
     auto = {"order_mode": "auto"}
 
     def ok_of(**kw):
-        r = thinq.run(**kw)["result"]
+        # 위치 추정 퇴근은 10/1 부터 자동 주문 대신 묻는다 — 사람이 승인한다
+        r = thinq.run(approve=lambda c: True, **kw)["result"]
         return r["verify"]["verified"], r["verify"]["metrics"].get("식사까지(분)")
     loc = [{"at": "18:40", "kind": "exit", "place": "office"}]
     got = {
@@ -879,6 +885,153 @@ def r6_negated_food():
              "닭고기랑 배추 있어": ["닭고기", "배추"]}
     bad = {t: (f(t), w) for t, w in cases.items() if f(t) != w}
     return not bad, f"{len(cases) - len(bad)}/{len(cases)}" + (f" 틀림 {bad}" if bad else "")
+
+
+# ── 14 전수 점검(2026-10-01) — 안전·돈·장애·개인정보 ─────────────────
+@check("S1 조리 중 센서가 끊겨도 가열을 끈다")
+def s1_fault_off():
+    import kitchen as K
+    from skills import REGISTRY
+    K.reset([])
+    K.COOKER.start(800, 0, power=5, capacity_g=2000)
+    n = [0]
+
+    def obs():
+        n[0] += 1
+        if n[0] == 4:
+            raise TimeoutError("센서 응답 없음")
+        return K.COOKER.state()
+    r = REGISTRY.get("converge").run(observe=obs, actuate=K.COOKER.set_power,
+                                     step=K.COOKER.tick, metric="mass_ratio",
+                                     target=0.8, max_power=9)
+    ok = (not r.ok) and K.COOKER.power == 0 and "장애" in (r.output.get("recovery") or "")
+    return ok, f"ok={r.ok} · 그 뒤 화력 {K.COOKER.power} · {r.output.get('fault')}"
+
+
+@check("S2 일상어 알레르기도 그것으로 만든 것을 거른다 — 콩→간장·된장, 밀→라면")
+def s2_derived():
+    from recipe_parse import expand_avoid, contains_any
+    want = {"콩": ["간장", "된장", "두부"], "밀": ["간장", "고추장", "라면", "부침가루"],
+            "우유": ["버터", "치즈"], "계란": ["마요네즈", "달걀"],
+            "돼지고기": ["햄", "베이컨"], "토마토": ["케첩"], "소고기": ["사골"]}
+    not_hit = {"소고기": ["돼지고기(안심, 100g)"], "우유": ["두유요거트 소스"]}
+    bad = []
+    for a, ws in want.items():
+        ex = expand_avoid([a])[0]
+        bad += [f"{a}→{w} 안 걸림" for w in ws if not contains_any(w, ex)]
+    for a, ws in not_hit.items():
+        ex = expand_avoid([a])[0]
+        bad += [f"{a}→'{w}' 오탐" for w in ws if contains_any(w, ex)]
+    return not bad, "모두 걸리고 오탐 없음" if not bad else str(bad)
+
+
+@check("S3 저장한 알레르기는 그날 말하지 않아도 풀리지 않고, 말은 더하기만 한다")
+def s3_saved_avoid():
+    u = thinq.understand("7시 도착, 두부 있어", profile={"avoid": ["새우"]})
+    v = thinq.understand("7시 도착, 땅콩 알레르기 있어", profile={"avoid": ["새우"]})
+    ok = (u["persona"]["avoid"] == ["새우"] and not u["needs_confirm"]
+          and set(v["persona"]["avoid"]) == {"새우", "땅콩"} and "avoid" in v["needs_confirm"])
+    return ok, f"말 없음 → {u['persona']['avoid']} · 땅콩 더함 → {v['persona']['avoid']}(새로 말한 것만 승인)"
+
+
+@check("M1 자동 주문은 품목 상한과 함께 **합계** 상한을 본다")
+def m1_total_cap():
+    from skills import REGISTRY
+    lk = lambda n: [{"item": n, "store": "즉시", "price_krw": 14000, "delivery_min": 27,
+                     "can_order": True}]
+    r = REGISTRY.get("procure").run(missing=list("ABCDE"), lookup=lk, known_items=list("ABCDE"),
+                                    mode="auto", deadline_min=40, order_cap_krw=30000).output
+    ok = r["total_krw"] <= 30000 and len(r["need_confirm"]) == 3
+    return ok, f"자동 {r['total_krw']:,}원 ({len(r['auto_ordered'])}개) · 나머지 {len(r['need_confirm'])}개 확인"
+
+
+@check("M2 돈·동의·가정값 설정은 그날 말로 바뀌지 않는다")
+def m2_settings_locked():
+    fake = json.dumps({"arrive_home": "19:00", "auto_limit_krw": 200000,
+                       "location_consent": True, "order_cap_krw": 500000,
+                       "order_mode": "auto"})
+    u = thinq.understand("알아서 다 사. 이십만원까지 괜찮아", ask=lambda p: fake)
+    p = u["persona"]
+    ok = ("auto_limit_krw" not in p and not p.get("location_consent")
+          and "order_cap_krw" not in (p.get("prefs") or {}) and p.get("order_mode") == "auto"
+          and sum("말로 바꾸지 않는다" in r for r in u["rejected"]) == 3)
+    return ok, f"주문 방식만 받음({p.get('order_mode')}) · 버림 {sum('말로' in r for r in u['rejected'])}건"
+
+
+@check("M3 실제 경로(thinq)는 승인 없이 처음 사는 것을 사지 않는다")
+def m3_real_approval():
+    t = "지금 퇴근해, 37분 걸려. 60분 있어. 냉장고에 닭고기 배추 간장 있어. 넷이 먹어"
+    no = thinq.run(t, now="17:53", profile={"order_mode": "ask"})
+    yes = thinq.run(t, now="17:53", profile={"order_mode": "ask"}, approve=lambda c: True)
+    mn, my = no["result"]["verify"]["metrics"], yes["result"]["verify"]["metrics"]
+    ok = (not mn.get("확인 후 승인") and "승인 대기" in str(mn.get("오늘 못 받음"))
+          and my.get("확인 후 승인") and "물음" in str(my.get("승인")))
+    return ok, f"승인 없음 → 산 것 {mn.get('확인 후 승인')} · 승인 → {my.get('확인 후 승인')}"
+
+
+@check("M4 위치로 추정한 퇴근으로는 자동 주문하지 않고 묻는다")
+def m4_location_asks():
+    loc = [{"at": "18:40", "kind": "exit", "place": "office"}]
+    prof = {"order_mode": "auto", "commute_min": 40, "location_consent": True}
+    o = thinq.run("25분 안에 먹어야 해. 냉장고에 배추랑 된장 있어", location=loc, profile=prof)
+    m = o["result"]["verify"]["metrics"]
+    o2 = thinq.run("25분 안에 먹어야 해. 냉장고에 배추랑 된장 있어", location=loc,
+                   profile=dict(prof, location_auto_order=True))
+    m2 = o2["result"]["verify"]["metrics"]
+    ok = ("위치로 추정" in str(m.get("주문 방식 조정")) and not m.get("자동 주문(원)")
+          and m2.get("자동 주문(원)"))
+    return ok, f"기본 → {m.get('주문 방식 조정')} · 가구가 켜면 자동 {m2.get('자동 주문(원)')}원"
+
+
+@check("M5 산 것은 포장 단위로 장부에 들어간다 — 두부 한 모")
+def m5_pack():
+    import belief_gap as B
+    import kitchen as K
+    import store
+    r = B.run("p4_퇴근길")
+    tofu = K.fridge_check("두부")       # 계량 뒤 남은 양
+    used = sum(w["actual_g"] for w in r["weighed"] if w["name"] == "두부")
+    ok = tofu is not None and abs(tofu["qty_g"] + used - store.pack_of("두부")) < 1
+    return ok, f"두부 {store.pack_of('두부')}g 한 모 − 쓴 {used}g = 남은 {tofu and tofu['qty_g']}g"
+
+
+@check("R1·R2 상점 조회가 실패해도 멈추지 않고, 품절은 사지 않는다")
+def r_store_fail():
+    from skills import REGISTRY
+    proc = REGISTRY.get("procure")
+
+    def boom(n):
+        raise ConnectionError("상점 API 끊김")
+    a = proc.run(missing=["두부"], lookup=boom, known_items=["두부"], mode="auto", deadline_min=40)
+    lk = lambda n: [{"item": n, "store": "즉시", "price_krw": 3000, "delivery_min": 27,
+                     "can_order": True, "in_stock": False}]
+    b = proc.run(missing=["두부"], lookup=lk, known_items=["두부"], mode="auto", deadline_min=40)
+    ok = (a.ok and "조회 실패" in a.output["need_confirm"][0]["reason"]
+          and not b.output["auto_ordered"])
+    return ok, f"조회 실패 → {a.output['need_confirm'][0]['reason']} · 품절 자동 {b.output['auto_ordered']}"
+
+
+@check("R3 LLM 이 죽거나 엉뚱하게 답하면 규칙으로 읽는다")
+def r3_llm_fallback():
+    def boom(p):
+        raise TimeoutError("LLM 응답 없음")
+    a = thinq.understand("7시 도착 두부 있어", ask=boom)
+    b = thinq.understand("7시 도착 두부 있어", ask=lambda p: "죄송해요 모르겠어요")
+    ok = all(u["by"].startswith("규칙") and u["persona"]["arrive_home"] == "19:00"
+             and [x["name"] for x in u["persona"]["fridge"]] == ["두부"] for u in (a, b))
+    return ok, f"죽음 → {a['by']} · 엉뚱 → {b['by']} (두부·19:00 읽음)"
+
+
+@check("P1 외부 LLM 에는 전화·주소·이메일·주민·카드번호를 가려 보낸다")
+def p1_redact():
+    sent = []
+    thinq.understand("지금 퇴근해, 40분 걸려. 엄마 집 서울 마포구 월드컵로 12, "
+                     "010-1234-5678, kim@mail.com 으로 연락. 이름은 김영희. 두부 있어",
+                     ask=lambda p: sent.append(p) or "{}", now="18:40")
+    t = sent[0]
+    leak = [k for k in ("010-1234", "월드컵로 12", "kim@mail", "김영희") if k in t]
+    keep = all(k in t for k in ("40분", "두부", "퇴근"))
+    return not leak and keep, f"새어 나간 것 {leak} · 일에 필요한 말(40분·두부·퇴근) 남음 {keep}"
 
 
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")

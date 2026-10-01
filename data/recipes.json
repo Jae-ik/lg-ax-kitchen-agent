@@ -1,7 +1,7 @@
 {
  "source": "식품의약품안전처 조리식품의 레시피 DB (COOKRCP01)",
  "endpoint": "http://openapi.foodsafetykorea.go.kr/api/<키>/COOKRCP01/json/<시작>/<끝>",
- "license": "공공데이터 개방 — 식품안전나라 데이터활용서비스",
+ "license": "공공데이터 개방 — 식품안전나라 데이터활용서비스. 공공데이터포털 표기: '이용허락범위 제한 없음' (data.go.kr/data/15060073, 2026-10-01 확인)",
  "key_used": "공개 sample 키",
  "count": 100,
  "recipes": [

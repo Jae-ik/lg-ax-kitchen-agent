@@ -76,7 +76,8 @@ def dwell_rows() -> list:
     rows = []
     for c in COMMUTE:
         for d in DWELL:
-            o = thinq.run(food, location=loc,
+            # 위치 추정 퇴근은 자동 주문 대신 묻는다(10/1) — 사람이 승인한다
+            o = thinq.run(food, location=loc, approve=lambda c_: True,
                           profile={"order_mode": "auto", "commute_min": c,
                                    "location_consent": True, "location_dwell_min": d})
             v = o["result"]["verify"]

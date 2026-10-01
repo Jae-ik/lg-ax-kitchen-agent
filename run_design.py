@@ -101,7 +101,8 @@ def _sourced(p: dict) -> list:
 
 
 def design_for(pid: str, trace: Trace, seed: int = 7,
-               keep_records: bool = False, beats_factory=None) -> dict:
+               keep_records: bool = False, beats_factory=None,
+               approve_purchase=None) -> dict:
     """beats_factory: (friction_of) -> beats_for. LLM 장면 제안을 쓸 때 준다.
     friction_of 는 situation_read 가 **이번에 읽은** 수고를 돌려준다."""
     p = personas.get(pid)
@@ -124,6 +125,10 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
     # 실행 층에 넘길 초기값. 상황 판단(situation_read)이 끝난 뒤에야 알 수
     # 있는 값(시간 예산 등)이 있으므로, 같은 dict 를 참조로 공유해 나중에 채운다.
     seed = {"pantry_refill": refill}
+    # 처음 사는 것·상한 초과 등 확인이 필요한 주문의 승인. None 이면 시연 —
+    # 동의했다고 가정하고 결과에 그렇게 적는다(실제 경로는 thinq 가 넘긴다).
+    if approve_purchase is not None:
+        seed["approve_purchase"] = approve_purchase
     ctx = {"persona": p, "seed": seed,
            "executor": make_executor(REGISTRY, seed_ctx=seed)}
     if beats_factory is not None:

@@ -20,7 +20,9 @@ import urllib.request
 
 from recipe_parse import parse_ingredients
 
-BASE = "http://openapi.foodsafetykorea.go.kr/api"
+# https 로 받는다 — 발급 인증키가 주소에 실려 가므로 평문(http)으로 보내지 않는다.
+# (공공데이터포털 안내문은 http 주소를 적지만 https 도 같은 응답을 준다, 2026-10-01 확인)
+BASE = "https://openapi.foodsafetykorea.go.kr/api"
 SERVICE = "COOKRCP01"
 DATA = pathlib.Path(__file__).parent / "data"
 RAW = DATA / "_raw_recipes.json"
@@ -93,7 +95,7 @@ def build(rows: list) -> dict:
         })
     return {"source": "식품의약품안전처 조리식품의 레시피 DB (COOKRCP01)",
             "endpoint": f"{BASE}/<키>/{SERVICE}/json/<시작>/<끝>",
-            "license": "공공데이터 개방 — 식품안전나라 데이터활용서비스",
+            "license": "공공데이터 개방 — 식품안전나라 데이터활용서비스. 공공데이터포털 표기: '이용허락범위 제한 없음' (data.go.kr/data/15060073, 2026-10-01 확인)",
             "key_used": "발급키" if os.environ.get("MFDS_KEY") else "공개 sample 키",
             "count": len(out), "recipes": out}
 

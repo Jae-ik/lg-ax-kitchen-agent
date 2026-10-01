@@ -14,6 +14,43 @@ from typing import Callable
 from .base import Skill, SkillResult
 
 
+def _actuator_safe(fn):
+    """**어떤 이유로 끝나든 액추에이터를 끈다.**
+
+    성공·실패·상한 경로는 각각 끄고 있었지만, 관측이 예외로 끊기면
+    (센서 응답 없음·통신 끊김) 예외가 그대로 올라가 **화력 5 로 가열이
+    켜진 채** 남았다(2026-10-01 점검에서 재현). 되돌릴 수 없는 과정이다 —
+    예외도 종료 경로다. 끄고, 왜 멈췄는지와 어떻게 이어 갈지를 돌려준다.
+    functools.wraps 로 감싸 run 의 인자 목록(선언 대조 검사)은 그대로다.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrap(self, observe, actuate, *a, **kw):
+        try:
+            return fn(self, observe, actuate, *a, **kw)
+        except Exception as e:                      # 장애도 종료 경로다
+            try:
+                actuate(0)
+                off = "가열을 껐다"
+            except Exception as e2:                 # 끄는 것마저 실패하면 그렇게 알린다
+                off = f"**끄지 못했다**({type(e2).__name__}) — 사람이 직접 꺼야 한다"
+            target = kw.get("target", a[2] if len(a) > 2 else None)
+            return SkillResult(False, {
+                "reached": False, "steps": None, "final": None, "target": target,
+                "trace": [], "events": [], "coasted_from": None, "guard_notes": [],
+                "held": None, "remaining_min": None, "progress_pct": None,
+                "fault": f"{type(e).__name__}: {e}",
+                "recovery": (f"조리 중 장애({type(e).__name__}: {e}) — {off}. "
+                             f"기기 연결을 확인한 뒤 남은 조리를 다시 시작하거나 "
+                             f"사람이 이어서 한다")},
+                [f"조리 중 장애 — {type(e).__name__}: {e}", f"안전을 위해 {off}"])
+        except BaseException:
+            actuate(0)                               # 중단(Ctrl+C 등)에도 끈다
+            raise
+    return wrap
+
+
 class ConvergeSkill(Skill):
     name = "converge"
     description = ("관측값을 목표값에 도달시킨다. 매 단계 현재 상태를 읽고 목표와의 차이를 "
@@ -55,6 +92,7 @@ class ConvergeSkill(Skill):
     # (끓기 전후는 12배까지 뛰지만 그 구간은 ready 분기가 잡는다).
     ETA_SAFETY = 1.7
 
+    @_actuator_safe
     def run(self, observe: Callable, actuate: Callable, step: Callable,
             metric: str, target: float, direction: str = "down",
             power_key: str = "power", max_power: int = 5, max_steps: int = 30,

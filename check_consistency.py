@@ -307,7 +307,8 @@ def c7():
         R |= set(GET_PAT.findall(ln))
 
     seeded = {"pantry_refill", "time_budget_min", "touches",
-              "planned_order_mode"}   # run_design 이 situation_read 뒤에 채운다
+              "planned_order_mode",   # run_design 이 situation_read 뒤에 채운다
+              "approve_purchase"}     # 실제 경로(thinq)가 주입하는 승인 함수
     bad = []
     orphan = sorted(k for k in W if k not in R)
     if orphan:
