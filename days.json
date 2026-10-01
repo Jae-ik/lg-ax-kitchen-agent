@@ -1,0 +1,543 @@
+{
+ "days": 3,
+ "results": {
+  "p1_야근": {
+   "carry": [
+    {
+     "day": 1,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [],
+     "order_krw": 0,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 14.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 222,
+      "두부": 227,
+      "된장": 479,
+      "애호박": 180
+     }
+    },
+    {
+     "day": 2,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [],
+     "order_krw": 0,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 14.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 122,
+      "두부": 154,
+      "된장": 459,
+      "애호박": 180
+     }
+    },
+    {
+     "day": 3,
+     "verified": false,
+     "menu": "-",
+     "bought": [],
+     "order_krw": 0,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": null,
+     "halted": "menu 에서 멈춤 — 실행 가능한 후보가 없다 — 검토한 105건 중 105건이 제외됐다 (기피 재료 또는 재고 부족)",
+     "found_home": null,
+     "stock_after": {
+      "배추": 122,
+      "두부": 154,
+      "된장": 459,
+      "애호박": 180
+     }
+    }
+   ],
+   "fresh": [
+    {
+     "day": 1,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [],
+     "order_krw": 0,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 14.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 222,
+      "두부": 227,
+      "된장": 479,
+      "애호박": 180
+     }
+    },
+    {
+     "day": 2,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [],
+     "order_krw": 0,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 14.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "애호박": 180,
+      "된장": 459,
+      "두부": 154,
+      "배추": 122
+     }
+    },
+    {
+     "day": 3,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [],
+     "order_krw": 0,
+     "extra_bought": [],
+     "stale_used": [
+      "두부",
+      "배추"
+     ],
+     "meal_min": 14.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "애호박": 180,
+      "된장": 439,
+      "두부": 79,
+      "배추": 22
+     }
+    }
+   ]
+  },
+  "p2_맞벌이": {
+   "carry": [
+    {
+     "day": 1,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "두부"
+     ],
+     "order_krw": 2800,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 11.7,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 123,
+      "된장": 459,
+      "애호박": 180,
+      "두부": 153
+     }
+    },
+    {
+     "day": 2,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "배추"
+     ],
+     "order_krw": 4800,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 11.8,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 1923,
+      "된장": 419,
+      "애호박": 180,
+      "두부": 6
+     }
+    },
+    {
+     "day": 3,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "두부",
+      "배추"
+     ],
+     "order_krw": 7600,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 11.6,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "된장": 379,
+      "애호박": 180,
+      "두부": 155,
+      "배추": 1799
+     }
+    }
+   ],
+   "fresh": [
+    {
+     "day": 1,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "두부"
+     ],
+     "order_krw": 2800,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 11.7,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 123,
+      "된장": 459,
+      "애호박": 180,
+      "두부": 153
+     }
+    },
+    {
+     "day": 2,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "두부"
+     ],
+     "order_krw": 2800,
+     "extra_bought": [
+      "두부"
+     ],
+     "stale_used": [],
+     "meal_min": 10.8,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "애호박": 180,
+      "된장": 419,
+      "두부": 153
+     }
+    },
+    {
+     "day": 3,
+     "verified": false,
+     "menu": "된장찌개",
+     "bought": [
+      "두부"
+     ],
+     "order_krw": 2800,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": null,
+     "halted": "prep 에서 멈춤 — 계량하지 못한 재료 1건: 배추 — 조달이 끝나지 않았거나 재고가 목표의 절반에 못 미친다",
+     "found_home": null,
+     "stock_after": {
+      "애호박": 180,
+      "된장": 379,
+      "두부": 151
+     }
+    }
+   ]
+  },
+  "p3_알레르기": {
+   "carry": [
+    {
+     "day": 1,
+     "verified": true,
+     "menu": "호박잎 삼계탕",
+     "bought": [
+      "미나리",
+      "찹쌀"
+     ],
+     "order_krw": 6700,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 32.2,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "닭고기": 28,
+      "간장": 400,
+      "배추": 300,
+      "찹쌀": 589,
+      "미나리": 122
+     }
+    },
+    {
+     "day": 2,
+     "verified": true,
+     "menu": "호박잎 삼계탕",
+     "bought": [
+      "닭고기"
+     ],
+     "order_krw": 9800,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 30.4,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "간장": 400,
+      "배추": 300,
+      "찹쌀": 192,
+      "미나리": 44,
+      "닭고기": 521
+     }
+    },
+    {
+     "day": 3,
+     "verified": true,
+     "menu": "호박잎 삼계탕",
+     "bought": [
+      "미나리",
+      "찹쌀"
+     ],
+     "order_krw": 6700,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 32.0,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "간장": 400,
+      "배추": 300,
+      "찹쌀": 794,
+      "미나리": 164,
+      "닭고기": 39
+     }
+    }
+   ],
+   "fresh": [
+    {
+     "day": 1,
+     "verified": true,
+     "menu": "호박잎 삼계탕",
+     "bought": [
+      "미나리",
+      "찹쌀"
+     ],
+     "order_krw": 6700,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 32.2,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "닭고기": 28,
+      "간장": 400,
+      "배추": 300,
+      "찹쌀": 589,
+      "미나리": 122
+     }
+    },
+    {
+     "day": 2,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "된장",
+      "두부",
+      "미나리",
+      "배추",
+      "찹쌀"
+     ],
+     "order_krw": 19700,
+     "extra_bought": [],
+     "stale_used": [
+      "닭고기"
+     ],
+     "meal_min": 57.4,
+     "halted": null,
+     "found_home": "집 — 발견까지 9분을 이미 썼고, 퇴근길 주문은 쓸 수 없다",
+     "stock_after": {
+      "된장": 421,
+      "닭고기": 500,
+      "두부": 7,
+      "간장": 400,
+      "배추": 1901
+     }
+    },
+    {
+     "day": 3,
+     "verified": true,
+     "menu": "호박잎 삼계탕",
+     "bought": [
+      "미나리",
+      "찹쌀"
+     ],
+     "order_krw": 6700,
+     "extra_bought": [],
+     "stale_used": [
+      "닭고기"
+     ],
+     "meal_min": 32.0,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "된장": 421,
+      "미나리": 120,
+      "닭고기": 18,
+      "두부": 7,
+      "간장": 400,
+      "배추": 1901,
+      "찹쌀": 602
+     }
+    }
+   ]
+  },
+  "p4_퇴근길": {
+   "carry": [
+    {
+     "day": 1,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "두부",
+      "참기름"
+     ],
+     "order_krw": 11700,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 9.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 222,
+      "된장": 479,
+      "두부": 227
+     }
+    },
+    {
+     "day": 2,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [],
+     "order_krw": 0,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 9.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 122,
+      "된장": 459,
+      "두부": 154
+     }
+    },
+    {
+     "day": 3,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "배추"
+     ],
+     "order_krw": 4800,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 9.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "된장": 439,
+      "두부": 79,
+      "배추": 1900
+     }
+    }
+   ],
+   "fresh": [
+    {
+     "day": 1,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "두부",
+      "참기름"
+     ],
+     "order_krw": 11700,
+     "extra_bought": [],
+     "stale_used": [],
+     "meal_min": 9.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "배추": 222,
+      "된장": 479,
+      "두부": 227
+     }
+    },
+    {
+     "day": 2,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "두부",
+      "참기름"
+     ],
+     "order_krw": 11700,
+     "extra_bought": [
+      "두부",
+      "참기름"
+     ],
+     "stale_used": [],
+     "meal_min": 9.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "된장": 459,
+      "두부": 227,
+      "배추": 122
+     }
+    },
+    {
+     "day": 3,
+     "verified": true,
+     "menu": "된장찌개",
+     "bought": [
+      "두부",
+      "참기름"
+     ],
+     "order_krw": 11700,
+     "extra_bought": [
+      "두부",
+      "참기름"
+     ],
+     "stale_used": [
+      "배추"
+     ],
+     "meal_min": 9.5,
+     "halted": null,
+     "found_home": null,
+     "stock_after": {
+      "된장": 439,
+      "두부": 225,
+      "배추": 22
+     }
+    }
+   ]
+  }
+ },
+ "summary": {
+  "p1_야근": {
+   "carry": "성립 2/3 · 0원 · 또 산 것 0",
+   "fresh": "성립 3/3 · 0원 · 또 산 것 0 · **수명 끝 재료 쓴 날 1**"
+  },
+  "p2_맞벌이": {
+   "carry": "성립 3/3 · 15,200원 · 또 산 것 0",
+   "fresh": "성립 2/3 · 8,400원 · 또 산 것 1"
+  },
+  "p3_알레르기": {
+   "carry": "성립 3/3 · 23,200원 · 또 산 것 0",
+   "fresh": "성립 3/3 · 33,100원 · 또 산 것 0 · 집에서 안 날 1 · **수명 끝 재료 쓴 날 2**"
+  },
+  "p4_퇴근길": {
+   "carry": "성립 3/3 · 16,500원 · 또 산 것 0",
+   "fresh": "성립 3/3 · 35,100원 · 또 산 것 4 · **수명 끝 재료 쓴 날 1**"
+  }
+ }
+}

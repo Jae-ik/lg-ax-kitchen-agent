@@ -176,6 +176,29 @@ def c5g():
     return "\n".join(bad)
 
 
+@check("README 의 '장부가 날을 넘긴다' 표가 실제 실행과 같은가")
+def c5d():
+    import json
+    import os
+    if not os.path.exists("days.json"):
+        return "days.json 이 없다 — days.py 를 먼저 돌려야 한다"
+    sm = json.load(open("days.json", encoding="utf-8"))["summary"]
+    doc = io.open("README.md", encoding="utf-8").read().splitlines()
+    labels = {"p1_야근": "야근 1인", "p2_맞벌이": "맞벌이 2인", "p3_알레르기": "알레르기 4인",
+              "p4_퇴근길": "퇴근길 1인"}
+    i = next((k for k, l in enumerate(doc) if l.startswith("| 가구 (3일) |")), None)
+    if i is None:
+        return "README 에 장부 표가 없다"
+    bad = []
+    for l in doc[i + 2:i + 2 + len(labels)]:
+        cells = [c.strip() for c in l.strip().strip("|").split("|")]
+        pid = next((k for k, v in labels.items() if v == cells[0]), None)
+        if pid is None or cells[1:] != [sm[pid]["carry"], sm[pid]["fresh"]]:
+            bad.append(f"{cells[0]}: README {cells[1:]} / 실행 "
+                       f"{[sm.get(pid, {}).get('carry'), sm.get(pid, {}).get('fresh')]}")
+    return "\n".join(bad)
+
+
 @check("README 의 주문 사고 표가 실제 실행과 같은가")
 def c5o():
     import json

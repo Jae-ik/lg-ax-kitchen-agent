@@ -1111,6 +1111,31 @@ def u6c_fail():
                 f"취소·들러 사 줌 {can_y['meal_min']}분")
 
 
+# ── 17 남은 위험 2 — 장부가 날을 넘긴다 (2026-10-01) ───────────────────
+@check("2 장부를 이으면 어제 산 것을 또 사지 않고, 수명 끝 재료를 쓰지 않는다")
+def v2_ledger():
+    import days
+    carry = days.run_days("p4_퇴근길", 3, True)
+    fresh = days.run_days("p4_퇴근길", 3, False)
+    buys = lambda r, x: sum(x in d["bought"] for d in r)
+    ok = (buys(carry, "참기름") == 1 and buys(fresh, "참기름") == 3
+          and not any(d["stale_used"] for d in carry)
+          and any(d["stale_used"] for d in fresh))
+    return ok, (f"참기름 산 날: 장부 {buys(carry, '참기름')} · 장부 없음 {buys(fresh, '참기름')} · "
+                f"수명 끝 사용: 장부 {sum(bool(d['stale_used']) for d in carry)} · "
+                f"장부 없음 {sum(bool(d['stale_used']) for d in fresh)}")
+
+
+@check("기한 정의가 하나다 — 보관일이 수명에 닿으면 어디서도 쓰지 않는다")
+def v2_expiry_one():
+    import kitchen_domain as KD
+    from skills import REGISTRY
+    it = {"name": "두부", "qty_g": 300, "stored_days": 5, "shelf_life_days": 5}
+    inv = REGISTRY.get("inventory").run(items=[it]).output
+    ok = bool(inv["expired"]) and KD._expired(it)
+    return ok, f"5/5일 두부 — 보관 확인 버림 {bool(inv['expired'])} · 부족분·계량 버림 {KD._expired(it)}"
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

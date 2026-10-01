@@ -332,8 +332,11 @@ def cookware_check(avoid_expanded: list) -> dict | None:
 
 
 def _expired(item: dict) -> bool:
+    """보관일이 수명에 닿으면 쓰지 않는다 — 보관 확인 스킬(InventorySkill, left <= 0)과
+    **같은 정의**다. 10/1 까지 여기와 kitchen.fridge_add 는 '넘어야(>)' 로 봐서, 5일 수명
+    두부가 5일째에 보관 확인은 "버릴 것", 부족분·계량은 "쓸 수 있다" 였다(days 에서 드러남)."""
     sd, sl = item.get("stored_days"), item.get("shelf_life_days")
-    return sd is not None and bool(sl) and sd > sl
+    return sd is not None and bool(sl) and sd >= sl
 
 
 def unsure_stock(items: list) -> list:

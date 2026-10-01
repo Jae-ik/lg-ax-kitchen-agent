@@ -279,7 +279,7 @@ def fridge_add(name: str, qty_g: int, shelf_life_days: int = 5):
             # 옛 날짜(상한 것)를 물려받아, 상한 재료를 쓴 것으로 계산됐다
             # (2026-09-30). 기한 지난 것은 버리고 새것으로 바꾼다.
             sd, sl = x.get("stored_days"), x.get("shelf_life_days")
-            if sd is not None and sl and sd > sl:
+            if sd is not None and sl and sd >= sl:     # 수명에 닿으면(보관 확인과 같은 정의)
                 DISCARDED.append(f"{name}({sd}일, 기한 {sl}일) — 버리고 새것으로")
                 _FRIDGE.pop(i)
                 break

@@ -87,7 +87,7 @@ def run(pid: str, belief: list | None = None, reality: dict | None = None,
     m, v = r["verify"]["metrics"], r["verify"]
     stale = [w["name"] for w in log["weighed"]
              if w["actual_g"] and w["stored_days"] is not None and w["shelf"]
-             and w["stored_days"] > w["shelf"]]
+             and w["stored_days"] >= w["shelf"]]
     return {"verified": v["verified"], "menu": m.get("메뉴"),
             "budget_min": v.get("budget_min"), "confirm": m.get("재고 확인"),
             "discarded": m.get("버리고 바꿈"),
