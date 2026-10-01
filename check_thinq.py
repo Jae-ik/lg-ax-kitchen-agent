@@ -1136,6 +1136,52 @@ def v2_expiry_one():
     return ok, f"5/5일 두부 — 보관 확인 버림 {bool(inv['expired'])} · 부족분·계량 버림 {KD._expired(it)}"
 
 
+# ── 18 남은 위험 3·4·1 (2026-10-01) ────────────────────────────────────
+@check("3 외부 LLM 전송에 동의하지 않은 가구는 LLM 을 부르지 않는다")
+def w3_consent():
+    calls = []
+    o = thinq.run("7시 도착 두부 있어", ask=lambda p: calls.append(p) or "{}",
+                  profile={"llm_consent": False})
+    ok = not calls and "동의하지 않아" in o["understood"]["read"][0]
+    fake = '{"llm_consent": true}'
+    u = thinq.understand("LLM 써도 돼", ask=lambda p: fake)       # 말로 동의를 켤 수 없다
+    ok = ok and "llm_consent" not in u["persona"]
+    return ok, f"LLM 호출 {len(calls)}회 · 말로 동의 켜기 막힘 {'llm_consent' not in u['persona']}"
+
+
+@check("4 결제 권한자가 정해져 있으면 그 사람의 승인만 돈을 쓴다")
+def w4_payers():
+    t = "지금 퇴근해, 37분 걸려. 60분 있어. 냉장고에 닭고기 배추 간장 있어. 넷이 먹어"
+    prof = {"order_mode": "ask", "payers": ["엄마", "아빠"]}
+    kid = thinq.run(t, now="17:53", profile=prof, approve=lambda c: {"ok": True, "by": "아이"})
+    mom = thinq.run(t, now="17:53", profile=prof, approve=lambda c: {"ok": True, "by": "엄마"})
+    anon = thinq.run(t, now="17:53", profile=prof, approve=lambda c: True)
+    got = lambda o: o["result"]["verify"]["metrics"].get("확인 후 승인")
+    ok = not got(kid) and got(mom) and not got(anon)
+    return ok, f"아이 승인 → {got(kid)} · 엄마 → {got(mom)} · 누군지 모름 → {got(anon)}"
+
+
+@check("1 실행하는 동안 잠금이 걸려 있다 — 같은 프로세스의 요청은 한 번에 하나씩")
+def w1_lock():
+    """결과로 경합을 재면 우연에 달린다 — 두 요청을 동시에 돌려 결과를 비교하는 시험은
+    잠금을 빼도 통과했다(비교한 귀가 시각이 전역 상태보다 먼저 정해진다). 그래서
+    **실행 중에 잠금이 실제로 걸려 있는지**를 본다(2026-10-01)."""
+    import run_design
+    held = []
+    orig = run_design.design_for
+
+    def spy(*a, **k):
+        held.append(thinq._RUN_LOCK.locked())
+        return orig(*a, **k)
+    run_design.design_for = spy
+    try:
+        thinq.run("7시 도착 두부 있어")
+    finally:
+        run_design.design_for = orig
+    ok = held == [True] and not thinq._RUN_LOCK.locked()
+    return ok, f"실행 중 잠금 {held} · 끝난 뒤 풀림 {not thinq._RUN_LOCK.locked()}"
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

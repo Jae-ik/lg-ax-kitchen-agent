@@ -44,6 +44,13 @@ import os
 import re
 import shutil
 import sys
+import threading
+
+# ── 1 동시 처리 (2026-10-01) ─────────────────────────────────────────
+# 냉장고·조리기·가구 표가 모듈 전역이라(시뮬레이터 설계) 한 프로세스에서 두 요청이
+# 겹치면 섞인다. 서버로 쓰려면 가구별 상태 분리가 필요하다(README 설계). 그 전까지는
+# 한 번에 하나씩 돌린다.
+_RUN_LOCK = threading.Lock()
 
 # 안전 확인이 필요한 항목 — LLM 이 읽었어도 사람이 확인한다
 NEEDS_CONFIRM = ("avoid", "max_sodium_mg")
@@ -424,7 +431,9 @@ PROFILE_KEYS = ("order_mode", "auto_limit_krw",
                 # 근거를 못 찾은 가정값 — 가구가 정하면 그것을 쓴다(prefs 로 넘어간다)
                 "eat_min", "shop_detour_min", "shop_trip_min",
                 "order_cap_krw", "location_auto_order",
-                "avoid", "max_sodium_mg")
+                "avoid", "max_sodium_mg",
+                # 3 외부 LLM 전송 동의 · 4 결제 권한자 (2026-10-01)
+                "llm_consent", "payers")
 PREF_KEYS = ("eat_min", "shop_detour_min", "shop_trip_min",
              "order_cap_krw", "location_auto_order")
 # **안전 항목도 가구가 저장한다**(2026-10-01). 전에는 "말할 때마다 승인" 이라며
@@ -434,7 +443,8 @@ SAFETY_KEYS = ("avoid", "max_sodium_mg")
 # 돈·동의·가정값 설정은 **말로 바꾸지 않는다.** LLM 경로로 "이십만원까지 사"
 # 가 자동 주문 상한을, "위치 써도 돼" 가 위치 동의를 바꿨다(2026-10-01) —
 # 아이 말·잘못 들은 말·끼어든 문장으로 돈과 동의가 바뀐다. 설정에서만 바꾼다.
-SETTINGS_ONLY = ("auto_limit_krw", "location_consent", "leave_window",
+SETTINGS_ONLY = ("llm_consent", "payers",
+                 "auto_limit_krw", "location_consent", "leave_window",
                  "location_dwell_min", "eat_min", "shop_detour_min", "shop_trip_min",
                  "order_cap_krw", "location_auto_order")
 
@@ -638,6 +648,8 @@ def _validate(fields: dict):
         "location_dwell_min": (int, lambda v: 0 <= v <= 30),
         "eat_min": (int, lambda v: 5 <= v <= 120),
         "order_cap_krw": (int, lambda v: 0 <= v <= 500000),
+        "llm_consent": (bool, lambda v: True),
+        "payers": (list, lambda v: all(isinstance(x, str) and x for x in v)),
         "location_auto_order": (bool, lambda v: True),
         "shop_detour_min": (int, lambda v: 0 <= v <= 90),
         "shop_trip_min": (int, lambda v: 0 <= v <= 120),
@@ -830,7 +842,13 @@ def _invented_numbers(text: str, metrics: dict) -> list:
 
 
 # ── 전체 ───────────────────────────────────────────────────────────────
-def run(text: str, ask=None, seed: int = 7, approve=None,
+def run(*a, **kw) -> dict:
+    """자연어 한 줄에서 실행 결과와 설명까지 — 한 번에 하나씩(_RUN_LOCK)."""
+    with _RUN_LOCK:
+        return _run(*a, **kw)
+
+
+def _run(text: str, ask=None, seed: int = 7, approve=None,
         profile: dict | None = None, now: str | None = None,
         location: list | None = None) -> dict:
     """자연어 한 줄에서 실행 결과와 설명까지.
@@ -850,7 +868,15 @@ def run(text: str, ask=None, seed: int = 7, approve=None,
     from orchestrator import Trace
     from recipe_parse import expand_avoid
 
+    # 3 외부 LLM 전송 동의 — 가구가 동의하지 않았으면 LLM 을 **부르지 않는다**.
+    # 가려도 재료·시간·가족 수는 외부로 간다. 동의를 끄면 규칙으로만 읽고, 장면도
+    # 틀로, 설명도 규칙으로 한다(2026-10-01).
+    llm_note = None
+    if ask is not None and (profile or {}).get("llm_consent") is False:
+        ask, llm_note = None, "외부 LLM 전송에 동의하지 않아 규칙으로 읽었다"
     u = understand(text, ask=ask, profile=profile, now=now, location=location)
+    if llm_note:
+        u["read"].insert(0, llm_note)
     avoid = u["persona"].get("avoid", [])
     expanded, notes, unresolved = expand_avoid(avoid)
     no_hit = _no_hit(avoid)
@@ -886,8 +912,22 @@ def run(text: str, ask=None, seed: int = 7, approve=None,
     personas.PERSONAS[pid] = u["persona"]
     # 처음 사는 것 등 확인이 필요한 주문은 **사람에게 묻는다.** approve 가 없으면
     # 사지 않는다(승인 대기). 시연용 "동의 가정" 은 run_design 에만 있다.
+    # 4 결제 권한자 — 가구가 정해 두면 **그 사람의 승인만** 돈을 쓴다. 승인 함수는
+    # True/False 또는 {"ok": bool, "by": 이름} 을 돌려준다. 권한자가 정해져 있는데
+    # 누가 승인했는지 모르면 사지 않는다(아이가 누른 승인 등). 안전 승인(알레르기
+    # 확인)은 누구나 할 수 있다 — 막는 쪽이라 위험이 없다.
+    payers = (profile or {}).get("payers")
+
     def approve_purchase(items):
-        return bool(approve and approve({"purchase": list(items)}))
+        if not approve:
+            return False
+        res = approve({"purchase": list(items), "payers": payers})
+        ok, by = (bool(res.get("ok")), res.get("by")) if isinstance(res, dict) else (bool(res), None)
+        if payers and by not in payers:
+            u["read"].append(f"승인한 사람({by or '모름'})이 결제 권한자({', '.join(payers)})가 "
+                             f"아니라 사지 않았다")
+            return False
+        return ok
 
     buf = _io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -929,11 +969,16 @@ def _no_hit(avoid) -> list:
 
 
 def main() -> int:
-    args = [a for a in sys.argv[1:] if a != "--yes"]
+    args = [a for a in sys.argv[1:] if a not in ("--yes", "--llm-ok")]
     yes = "--yes" in sys.argv
     text = " ".join(args) or \
         "오늘 늦어. 9시 반쯤 들어가는데 냉장고에 배추랑 두부 있어. 30분 안에 먹고 싶어"
-    ask = best_ask()
+    # 외부 LLM 은 동의해야 쓴다 — 명령줄에서는 --llm-ok 로 동의한다
+    llm_ok = "--llm-ok" in sys.argv
+    ask = best_ask() if llm_ok else None
+    if not llm_ok:
+        print("(외부 LLM 을 쓰지 않는다 — 쓰려면 --llm-ok. 보내는 것: 가린 말(전화·주소 등 "
+              "제외)·재료·시간·가족 수)")
     print("=" * 74)
     print("씽큐 클로 식 진입점 — 자연어로 받고, 판단은 측정이 한다")
     print("=" * 74)
