@@ -811,6 +811,44 @@ def q3_prefs():
                 f"eat_min 500 버림")
 
 
+# ── 13 냉장고를 못 본다 — 출처·확인·기한 (2026-09-30) ──────────────────
+@check("기한 지난 재료는 부족분으로 다시 사고, 계량에서도 쓰지 않는다")
+def r1_expired():
+    import personas
+    import belief_gap as B
+    p = personas.get("p4_퇴근길")
+    # 믿음 = 실제. 배추가 기한(7일)을 넘겼다 — 확인 없이도 알 수 있는 사실이다
+    fridge = [dict(x, stored_days=9) if x["name"] == "배추" else x for x in p["fridge"]]
+    r = B.run("p4_퇴근길", belief=fridge)
+    ok = r["verified"] and not r["stale_used"] and "배추" in r["added"]
+    return ok, f"상한 사용 {r['stale_used']} · 새로 산 것 {r['added']}"
+
+
+@check("장부로 아는 재고는 묻지 않고, 말로 받은 재고만 퇴근길에 한 번 묻는다")
+def r2_confirm():
+    import belief_gap as B
+    led = B.run("p2_맞벌이", source="ledger")
+    told = B.run("p2_맞벌이", source="told")
+    ok = ("묻지 않음" in (led["confirm"] or "") and led["touches"] == 0
+          and "퇴근길 1회" in (told["confirm"] or "") and told["touches"] == 1)
+    return ok, f"장부: {led['confirm'][:10]}… 개입 {led['touches']} · 말: 개입 {told['touches']}"
+
+
+@check("확인으로 실제를 미리 알면 E1·E3·E4 를 집에 오기 전에 피한다")
+def r3_early():
+    import belief_gap as B
+    import personas
+    item = next(x for x in personas.get("p4_퇴근길")["fridge"] if x["name"] == "배추")
+    out = {k: B.with_reality("p4_퇴근길", real, "told") for k, real in {
+        "E1": {"배추": {"absent": True}}, "E3": {"배추": {"qty_g": 30}},
+        "E4": {"배추": {"stored_days": item["shelf_life_days"] + 2}}}.items()}
+    led = B.with_reality("p4_퇴근길", {"배추": {"absent": True}}, "ledger")
+    ok = (all(r["verified"] and not r["stale_used"] for r in out.values())
+          and not led["verified"])
+    return ok, (" · ".join(f"{k} {'성립' if r['verified'] else '실패'}" for k, r in out.items())
+                + f" · (장부인데 실제로 없음 → {'성립' if led['verified'] else '실패'})")
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

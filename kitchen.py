@@ -140,6 +140,59 @@ _FRIDGE_DEFAULT = [dict(x) for x in _FRIDGE]
 _RECORDS_DEFAULT = {k: dict(v) for k, v in RECORDS.items()}
 
 
+# ── 믿는 재고와 실제 냉장고 (2026-09-30) ─────────────────────────────
+# 에이전트는 냉장고 안을 보지 못한다. _FRIDGE 는 **에이전트가 믿는 재고**다.
+# 실제가 다를 때(_REALITY)는 사람이 확인해 주거나(confirm_stock) 저울에
+# 올릴 때(prep_weigh) 드러난다. 비어 있으면 믿음 = 실제다.
+# 재고 항목의 source — 어디서 알았나:
+#   ledger   에이전트가 주문한 기록(양·넣은 날을 안다). 쓴 양은 저울이 뺀다
+#   told     사람이 말해 준 것(틀릴 수 있다)
+#   assumed  모르는 값을 가정한 것(양 300g 등)
+#   confirmed 사람이 방금 확인해 준 것
+#   pantry   상비품
+_REALITY: dict = {}
+_ORDERED: set = set()          # 이번 시도에서 주문해 받은 것 — 실제로 있다
+DISCARDED: list = []           # 기한이 지나 버린 것(새것으로 바꾸며)
+
+
+def set_reality(reality: dict | None) -> None:
+    """{품목: {"absent": True} | {"qty_g", "stored_days"}} — 시험용."""
+    _REALITY.clear()
+    _REALITY.update(reality or {})
+
+
+def _apply_reality(name: str) -> None:
+    real = _REALITY.get(name)
+    if real is None or name in _ORDERED:
+        return
+    for i, x in enumerate(_FRIDGE):
+        if x["name"] == name:
+            if real.get("absent"):
+                _FRIDGE.pop(i)
+            else:
+                x.update({k: v for k, v in real.items() if k in ("qty_g", "stored_days")})
+            return
+
+
+def confirm_stock(names: list) -> list:
+    """사람이 냉장고를 보고 답한다 — 믿음을 실제로 고친다. 바뀐 것을 돌려준다."""
+    out = []
+    for n in names:
+        before = fridge_check(n)
+        _apply_reality(n)
+        after = fridge_check(n)
+        if before and not after:
+            out.append(f"{n}: 없다")
+        elif after:
+            ch = [f"{k} {before.get(k)}→{after.get(k)}" for k in ("qty_g", "stored_days")
+                  if before and before.get(k) != after.get(k)]
+            out.append(f"{n}: " + (", ".join(ch) if ch else "맞다"))
+            for x in _FRIDGE:
+                if x["name"] == n:
+                    x["source"] = "confirmed"
+    return out
+
+
 def reset(fridge_items=None, seed: int = 7, keep_records: bool = False):
     """가구를 바꿔 가며 실행할 때 상태를 격리한다.
 
@@ -151,6 +204,8 @@ def reset(fridge_items=None, seed: int = 7, keep_records: bool = False):
     random.seed(seed)
     src = fridge_items if fridge_items is not None else _FRIDGE_DEFAULT
     _FRIDGE = [dict(x) for x in src]
+    _ORDERED.clear()            # 실제(_REALITY)는 그대로 — 재계획해도 냉장고는 같다
+    DISCARDED.clear()
     # 조리하면 기록이 쌓인다. 상황을 바꿔 가며 비교할 때는 같은 출발점이어야
     # 하므로 기록도 함께 되돌린다. (keep_records=True 면 이어서 쌓는다)
     if not keep_records:
@@ -193,12 +248,22 @@ def reset_constants(dev=None):
 
 def fridge_add(name: str, qty_g: int, shelf_life_days: int = 5):
     """조달된 품목을 재고에 반영한다."""
-    for x in _FRIDGE:
+    _ORDERED.add(name)
+    for i, x in enumerate(_FRIDGE):
         if x["name"] == name:
+            # **기한이 지난 것에 새것을 합치지 않는다.** 합치면 새로 산 배추가
+            # 옛 날짜(상한 것)를 물려받아, 상한 재료를 쓴 것으로 계산됐다
+            # (2026-09-30). 기한 지난 것은 버리고 새것으로 바꾼다.
+            sd, sl = x.get("stored_days"), x.get("shelf_life_days")
+            if sd is not None and sl and sd > sl:
+                DISCARDED.append(f"{name}({sd}일, 기한 {sl}일) — 버리고 새것으로")
+                _FRIDGE.pop(i)
+                break
             x["qty_g"] += qty_g
             return dict(x)
+    # 에이전트가 주문했으니 양과 넣은 날을 안다
     _FRIDGE.append({"name": name, "qty_g": qty_g, "stored_days": 0,
-                    "shelf_life_days": shelf_life_days})
+                    "shelf_life_days": shelf_life_days, "source": "ledger"})
     return dict(_FRIDGE[-1])
 
 
@@ -237,6 +302,7 @@ def prep_weigh(name: str, target_g: int, consume: bool = True):
     아무 데도 남지 않아, 조리 단계가 잘못된 출발점을 정상으로 알았다.
     이제 부족분을 함께 돌려주고, 담은 만큼 재고에서 뺀다.
     """
+    _apply_reality(name)          # 저울에 올리면 실제가 드러난다
     item = fridge_check(name)
     if item is None:
         return {"ok": False, "reason": f"{name} 없음", "short_g": target_g}

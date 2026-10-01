@@ -300,6 +300,25 @@ def fits_device(rec: dict):
 
 MUST_USE_DAYS = 1       # 남은 날이 이 이하면 오늘 안 쓰면 버린다고 본다
 
+# 재고 확인 — **확신이 낮은 것만** 사람에게 묻는다(2026-09-30).
+# 장부(주문 기록)·저울로 아는 것은 묻지 않는다. 2주 넘게 가는 장류·양념은
+# 날짜가 틀려도 위험이 작아 묻지 않는다(가정). 묻는 것은 한 번, 한 메시지다.
+UNSURE_SOURCES = ("told", "assumed")
+CONFIRM_SHELF_DAYS = 14
+
+
+def _expired(item: dict) -> bool:
+    sd, sl = item.get("stored_days"), item.get("shelf_life_days")
+    return sd is not None and bool(sl) and sd > sl
+
+
+def unsure_stock(items: list) -> list:
+    return [x["name"] for x in items
+            if x.get("source") in UNSURE_SOURCES and x["name"] not in PANTRY
+            and (x.get("shelf_life_days") is None
+                 or x["shelf_life_days"] <= CONFIRM_SHELF_DAYS
+                 or x.get("stored_days") is None)]
+
 
 # 주방에서 쓰는 말. situation_read 의 근거 문장이 이 말을 쓴다.
 # 설계 층은 "조리량"·"세척" 같은 단어를 모른다.
@@ -360,6 +379,17 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
             "system": "재고와 남은 시간을 읽고 오늘 할 수 있는 것을 정한다",
             "removes": "냉장고를 열어 뭐가 남았는지 확인하는 일",
             "verified_by": "inventory", "expect_metric": "메뉴"})
+
+    unsure = unsure_stock([dict(x, source=x.get("source", persona.get("stock_source", "told")))
+                           for x in persona.get("fridge") or []])
+    if unsure:
+        beats.append({
+            "at": plus(lv, 1),
+            "user": "있는지만 답한다" + ("" if pre else " (집에서)"),
+            "system": f"직접 산 기록이 없는 재료({', '.join(unsure)})가 정말 있는지·"
+                      f"언제 넣었는지만 한 번 묻는다. 계량할 때(너무 늦게) 알던 것을 앞당긴다",
+            "removes": BACKGROUND_REMOVES,
+            "verified_by": "inventory", "expect_metric": "재고 확인"})
 
     if constraints.get("avoid"):
         beats.append({
@@ -698,6 +728,18 @@ def build_tasks(constraints: dict) -> list:
                                "나트륨제외": len(out["blocked_sodium"])}
 
     def _inventory_bind(ctx):
+        # 보관 확인 단계에서 **확신이 낮은 재고만** 사람에게 한 번 묻는다.
+        # 퇴근 시각을 알면 퇴근길 메시지로, 모르면 집에서. 답으로 믿음을 고친
+        # 뒤에 임박·메뉴를 판단한다 — 계량 때(집, 너무 늦게) 알던 것을 앞당긴다.
+        ask = unsure_stock(K.fridge_list_items())
+        if ask:
+            fixed = K.confirm_stock(ask)
+            ctx["touches"] = ctx.get("touches", 0) + 1
+            ctx["stock_confirm"] = {
+                "where": "퇴근길" if constraints.get("preorder") else "집에서",
+                "asked": ask, "answer": fixed}
+        else:
+            ctx["stock_confirm"] = None
         return {"items": K.fridge_list_items(), "urgency_ratio": 0.6}
 
     def _inventory_absorb(ctx, out):
@@ -766,7 +808,10 @@ def build_tasks(constraints: dict) -> list:
         # 찾는다. 바꾸지 않으면 메뉴는 "있다" 고 하고 계량은 "재고 없음" 으로
         # 실패했다 — 공개 레시피가 뽑히면 반드시 타는 경로였다.
         # 같은 재고로 모이는 재료(대파·쪽파 → 대파)는 양을 합친다.
-        stock = {s["name"]: s for s in K.fridge_list_items()}
+        # **기한 지난 것은 재고가 아니다.** 메뉴를 고를 때는 뺐는데 여기서
+        # 부족분을 다시 셀 때 넣어, 상한 배추가 "있음" 이 되어 새로 사지 않고
+        # 계량 때 그대로 썼다(2026-09-30, belief_gap E4 에서 드러남).
+        stock = {s["name"]: s for s in K.fridge_list_items() if not _expired(s)}
         merged = {}
         for ing in ctx["record"].get("ingredients", []):
             key = resolve_stock(ing["name"], stock) or ing["name"]
@@ -893,7 +938,9 @@ def build_tasks(constraints: dict) -> list:
 
     def _prep_bind(ctx):
         return {"record": ctx["record"], "weigh": K.prep_weigh,
-                "available": lambda n: K.fridge_check(n) is not None,
+                # 계량에서도 한 번 더 막는다 — 기한 지난 것은 없는 것이다
+                "available": lambda n: (K.fridge_check(n) is not None
+                                        and not _expired(K.fridge_check(n))),
                 "absorb_of": absorb_capacity, "solid_of": solid_mass,
                 "broth_of": broth_of}
 
@@ -1356,6 +1403,15 @@ def make_executor(registry, on_step=None, seed_ctx=None):
                 + (f" ({ctx.get('recipe_source')})" if ctx.get("recipe_source") else ""))
         if ctx.get("expired_note"):
             metrics["폐기 대상"] = ctx["expired_note"]
+        if K.DISCARDED:
+            metrics["버리고 바꿈"] = list(K.DISCARDED)
+        # 재고 확인 — 물었든 안 물었든 남긴다(조건부 판단은 결과가 없어도 남긴다)
+        sc = ctx.get("stock_confirm")
+        if sc:
+            metrics["재고 확인"] = (f"{sc['where']} 1회 — {', '.join(sc['asked'])} 가 "
+                                f"있는지 물음 → {'; '.join(sc['answer'])}")
+        elif "stock_confirm" in ctx:
+            metrics["재고 확인"] = "묻지 않음 — 확실하지 않은 필수 재료가 없다(장부·저울로 안다)"
         if ctx.get("delivery_note"):
             metrics["조달 대기"] = ctx["delivery_note"]
         elif "procure" in {r["skill"] for r in log}:

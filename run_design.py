@@ -93,6 +93,13 @@ def build_design_tasks(ctx_seed: dict) -> list:
     ]
 
 
+def _sourced(p: dict) -> list:
+    """재고마다 **어디서 알았나**를 붙인다. 항목에 없으면 가구의 stock_source,
+    그것도 없으면 사람이 말해 준 것(told)으로 본다."""
+    return [dict(x, source=x.get("source", p.get("stock_source", "told")))
+            for x in (p.get("fridge") or [])]
+
+
 def design_for(pid: str, trace: Trace, seed: int = 7,
                keep_records: bool = False, beats_factory=None) -> dict:
     """beats_factory: (friction_of) -> beats_for. LLM 장면 제안을 쓸 때 준다.
@@ -105,7 +112,7 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
     # seed 를 바꿔 같은 상황을 여러 번 돌리면 흔들림의 크기를 잴 수 있다.
     low = p.get("pantry_low")
     seed_val = seed        # 아래에서 seed 이름을 초기값 dict 로 다시 쓴다
-    K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed_val,
+    K.reset(_sourced(p) + pantry_stock(low), seed=seed_val,
             keep_records=keep_records)
 
     trace.stage("GOAL", f"{p['label']}의 수고를 줄이는 UX 시나리오를 만들고 "
@@ -164,7 +171,7 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
     def rerun(constraints):
         K.RECORDS.clear()
         K.RECORDS.update(copy.deepcopy(records0))
-        K.reset((p.get("fridge") or []) + pantry_stock(low), seed=seed_val,
+        K.reset(_sourced(p) + pantry_stock(low), seed=seed_val,
                 keep_records=True)
         ctx["constraints"] = constraints
         ctx["executor"] = make_executor(REGISTRY, seed_ctx=seed)

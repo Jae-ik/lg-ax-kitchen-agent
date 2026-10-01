@@ -162,15 +162,17 @@ def c5g():
               "p3_알레르기": "알레르기 4인", "p4_퇴근길": "퇴근길 1인"}
     doc = io.open("README.md", encoding="utf-8").read().splitlines()
     bad = []
-    for pid, lab in labels.items():
-        line = next((l for l in doc if l.startswith(f"| {lab} (")), None)
-        if line is None:
-            bad.append(f"README 에 '{lab} (' 줄이 없다")
-            continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")][1:]
-        got = [r["label"] for r in rows if r["persona"] == pid]
-        if cells != got:
-            bad.append(f"{lab}: 실행 {got} 인데 README {cells}")
+    for src, word in (("ledger", "장부"), ("told", "말로 받은 재고")):
+        for pid, lab in labels.items():
+            line = next((l for l in doc if l.startswith(f"| {lab} (")
+                         and l.split("|")[1].strip().endswith(f"· {word}")), None)
+            if line is None:
+                bad.append(f"README 에 '{lab} (… · {word}' 줄이 없다")
+                continue
+            cells = [c.strip() for c in line.strip().strip("|").split("|")][1:]
+            got = [r["label"] for r in rows if r["persona"] == pid and r["source"] == src]
+            if cells != got:
+                bad.append(f"{lab}·{word}: 실행 {got} 인데 README {cells}")
     return "\n".join(bad)
 
 

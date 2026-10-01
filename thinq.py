@@ -627,7 +627,9 @@ def _clean_fridge(items: list):
             notes.append(f"fridge: {name} 가 두 번 와서 양을 합쳤다")
             continue
         merged[name] = {"name": name, "qty_g": q if q is not None else 300,
-                        "stored_days": sd, "shelf_life_days": sl}
+                        "stored_days": sd, "shelf_life_days": sl,
+                        # 말로 받은 재고 — 양까지 모르면 가정이다
+                        "source": "told" if q is not None else "assumed"}
     if guessed:
         notes.append(f"fridge: 양을 몰라 300g 으로 가정 — {', '.join(guessed)}")
     unknown = [n for n, v in merged.items() if v["stored_days"] is None]
