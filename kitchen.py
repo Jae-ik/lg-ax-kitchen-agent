@@ -160,6 +160,14 @@ DISCARDED: list = []           # 기한이 지나 버린 것(새것으로 바꾸
 # "못 먹는 재료가 닿은 냄비" 를 사람이 기억하지 않아도 된다(2026-10-01).
 # 도마·칼은 기기가 아니라 기록이 없다 — 사람 몫이다.
 COOKWARE: list = []
+# 이 가구가 산 적 있는 품목(장부의 일부). "처음 사는 품목" 판단에 쓴다 — 전엔 코드에
+# 박힌 상수 목록을 모든 가구가 함께 써서, 어제 산 찹쌀도 오늘 또 "처음" 이었다(10/1).
+KNOWN: set = set()
+
+
+def known_reset(history) -> None:
+    KNOWN.clear()
+    KNOWN.update(history or [])
 
 
 def cookware_reset(history: list | None = None) -> None:
@@ -273,6 +281,7 @@ def reset_constants(dev=None):
 def fridge_add(name: str, qty_g: int, shelf_life_days: int = 5):
     """조달된 품목을 재고에 반영한다."""
     _ORDERED.add(name)
+    KNOWN.add(name)                       # 샀으니 다음부터는 "처음" 이 아니다
     for i, x in enumerate(_FRIDGE):
         if x["name"] == name:
             # **기한이 지난 것에 새것을 합치지 않는다.** 합치면 새로 산 배추가

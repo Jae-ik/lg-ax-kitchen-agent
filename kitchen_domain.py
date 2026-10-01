@@ -706,9 +706,12 @@ def _exclude_at(rid, constraints, verify):
     if elapsed is None:
         return _exclude(rid)
 
+    paid = list((verify.get("metrics") or {}).get("주문한 것") or [])
+
     def apply(c):
         c = _exclude(rid)(c)
         left = (c.get("time_budget_min") or 0) - elapsed
+        c = dict(c, committed_orders=list(c.get("committed_orders") or []) + paid)
         return dict(c, preorder=False, home_elapsed_min=elapsed,
                     commute_min=0, leave_source=None,
                     # 남은 시간 안에 와야 한다 — 새로 주문하면 집에서 기다린다
@@ -821,6 +824,7 @@ def build_tasks(constraints: dict) -> list:
         # 뒤에 임박·메뉴를 판단한다 — 계량 때(집, 너무 늦게) 알던 것을 앞당긴다.
         # 결과를 모으는 execute 는 constraints 를 못 본다 — 여기서 ctx 로 옮긴다
         ctx["home_elapsed_min"] = constraints.get("home_elapsed_min")
+        ctx["committed_orders"] = list(constraints.get("committed_orders") or [])
         ask = unsure_stock(K.fridge_list_items())
         if ask:
             fixed = K.confirm_stock(ask)
@@ -946,9 +950,13 @@ def build_tasks(constraints: dict) -> list:
         rec_g = {i["name"]: i["qty_g"] for i in ctx["record"].get("ingredients", [])}
         return {"missing": need,
                 "need_g": {n: rec_g.get(n) for n in need if rec_g.get(n)},
-                "order_cap_krw": prefs.get("order_cap_krw", ORDER_CAP_KRW),
+                # 합계 상한에는 앞선 계획에서 이미 결제한 것도 든다
+                "order_cap_krw": max(0, prefs.get("order_cap_krw", ORDER_CAP_KRW)
+                                     - sum(store.BASE_PRICE.get(n, 0) for n in
+                                           constraints.get("committed_orders") or [])),
                 "lookup": store.make_lookup(),
-                "known_items": KNOWN_ITEMS, "avoid": avoid,
+                # 가구별 구매 이력(장부) — 이번에 산 것까지 쌓인다
+                "known_items": sorted(K.KNOWN), "avoid": avoid,
                 "auto_limit_krw": constraints.get("auto_limit_krw", AUTO_LIMIT_KRW),
                 "deadline_min": constraints.get("budget_min"),
                 "mode": mode,
@@ -1119,6 +1127,9 @@ def build_tasks(constraints: dict) -> list:
                 ctx["wait_for_delivery_min"] = max(
                     ctx.get("wait_for_delivery_min", 0), a_eta)
         ctx["approved_after_ask"] = approved
+        # 이번에 실제로 주문한 것(받았거나 늦게 오는 것) — 집에서 다시 짤 때 넘긴다
+        ctx["ordered_names"] = (sorted({a["name"] for a in out["auto_ordered"]})
+                                + [n for n in approved])
         ctx["late_after_ask"] = late
         # 못 산 것(거절·결제 실패·취소)은 **주문할 때** 안다. 퇴근길에 주문했으면 퇴근길에
         # 안 것이다 — 그 뒤 계량에서 막혀도 "집에서 안 실패" 가 아니다. 이 표시가 없으면
@@ -1625,6 +1636,15 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["폐기 대상"] = ctx["expired_note"]
         if K.DISCARDED:
             metrics["버리고 바꿈"] = list(K.DISCARDED)
+        if ctx.get("ordered_names"):
+            metrics["주문한 것"] = list(ctx["ordered_names"])
+        # 집에서 다시 짰다면 **앞선 계획의 주문은 이미 결제됐고, 늦게라도 온다** —
+        # 전엔 결과에서 사라져 돈과 장부가 둘 다 틀렸다(10/1). 장부에 넣고 알린다.
+        if ctx.get("committed_orders"):
+            for n in ctx["committed_orders"]:
+                K.fridge_add(n, store.pack_of(n))
+            metrics["앞선 계획에서 이미 주문한 것"] = (
+                f"{', '.join(ctx['committed_orders'])} — 이미 결제했고 늦게 도착해 장부에 넣었다")
         if ctx.get("order_issues"):
             metrics["주문 사고"] = list(ctx["order_issues"])
         if ctx.get("discovery"):

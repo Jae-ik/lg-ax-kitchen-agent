@@ -1182,6 +1182,97 @@ def w1_lock():
     return ok, f"실행 중 잠금 {held} · 끝난 뒤 풀림 {not thinq._RUN_LOCK.locked()}"
 
 
+# ── 19 세부 점검 2차 (2026-10-01) ─────────────────────────────────────
+@check("D1·D2 인원은 두 자리·'열두' 까지, 양은 말한 대로(반 모·200g·3개) 읽는다")
+def x_people_qty():
+    f = lambda t: thinq.rule_understand(t)["fields"]
+    hh = {"열두 명이 먹어": 12, "12명 먹어": 12, "4인 가족": 4, "넷이 먹어": 4,
+          "혼자 먹어": 1, "2인분 남았어 넷이 먹어": 4}
+    qty = {"두부 반 모 있어": ("두부", 150), "닭고기 200g 있어": ("닭고기", 200),
+           "계란 3개 있어": ("계란", 180), "배추 한 포기 있어": ("배추", 2000)}
+    bad = [t for t, w in hh.items() if f(t).get("household_size") != w]
+    bad += [t for t, (n, g) in qty.items()
+            if (f(t).get("fridge") or [{}])[0].get("qty_g") != g]
+    return not bad, "모두 맞게 읽음" if not bad else f"틀림 {bad}"
+
+
+@check("D3 산 적 있는 품목은 가구별로 쌓이고, 다음에는 '처음 사는 품목' 이 아니다")
+def x_purchase_history():
+    import contextlib, io, personas, run_design
+    import kitchen as K
+    from orchestrator import Trace
+
+    def run(hist):
+        p = personas.get("p3_알레르기")
+        if hist is not None:
+            p["purchase_history"] = hist
+        personas.PERSONAS["_xh"] = dict(p, id="_xh")
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                r = run_design.design_for("_xh", Trace(), seed=7)
+        finally:
+            del personas.PERSONAS["_xh"]
+        return r["verify"]["metrics"].get("확인 요청") or []
+    first = run(None)
+    learned = set(K.KNOWN)
+    again = run(sorted(learned))
+    ok = (any("처음" in a for a in first) and "찹쌀" in learned
+          and not any("처음" in a for a in again))
+    return ok, f"첫날 {first} → 산 것 학습 '찹쌀' {'찹쌀' in learned} → 다음 {again}"
+
+
+@check("D4 도시 없는 주소·동호수도 가린다")
+def x_redact_more():
+    t = thinq.redact("마포구 월드컵로 12 101동 1203호로 와. 두부 있어")
+    ok = "월드컵로" not in t and "1203" not in t and "두부" in t
+    return ok, t
+
+
+@check("D5 집에서 다시 짤 때 이미 결제한 주문을 결과와 장부에 남긴다")
+def x_committed():
+    import contextlib, io, run_design, store
+    import kitchen as K
+    from orchestrator import Trace
+    store.set_order_reality({"찹쌀": {"late_min": 40}})
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            r = run_design.design_for("p3_알레르기", Trace(), seed=7)
+    finally:
+        store.set_order_reality(None)
+    m = r["verify"]["metrics"]
+    note = str(m.get("앞선 계획에서 이미 주문한 것", ""))
+    ok = "찹쌀" in note and K.fridge_check("찹쌀") is not None
+    return ok, f"{m.get('메뉴')} · {note[:40]}"
+
+
+@check("D6 설명은 물은 것을 빠짐없이 말하고, 안전·돈·계획 변경은 반드시 알린다")
+def x_explain():
+    o = thinq.run("8시 도착. 냉장고에 닭고기랑 배추 있어", profile={"order_mode": "auto"},
+                  approve=lambda c: True)
+    r = o["result"]
+    m, v = r["verify"]["metrics"], r["verify"]
+    t = thinq.rule_explain(r)
+    ok = (len(thinq.asked_list(m)) == v["user_touches"]
+          and "넣은 날 모름" in m and "냄새" in t and "꼭 알릴 것" in t)
+    return ok, f"물은 것 {len(thinq.asked_list(m))}건 = 개입 {v['user_touches']} · 냄새·색 안내 {'냄새' in t}"
+
+
+@check("D7 설명 LLM 이 죽어도 결과를 버리지 않고, LLM 설명에도 안전 안내를 붙인다")
+def x_explain_llm():
+    def boom_at_explain(p):
+        if "두세 문장" in p:
+            raise TimeoutError("설명 LLM 응답 없음")
+        return "{}"
+    a = thinq.run("8시 도착. 냉장고에 닭고기랑 배추 있어", ask=boom_at_explain,
+                  profile={"order_mode": "auto"}, approve=lambda c: True)
+    b = thinq.run("8시 도착. 냉장고에 닭고기랑 배추 있어",
+                  ask=lambda p: "맛있게 드세요." if "두세 문장" in p else "{}",
+                  profile={"order_mode": "auto"}, approve=lambda c: True)
+    ok = (a["result"] is not None and a["explained"]["by"].startswith("규칙")
+          and "꼭 알릴 것" in b["explained"]["text"])
+    return ok, f"설명 실패 → {a['explained']['by']} · LLM 설명 + 안내 덧붙임 {'꼭 알릴 것' in b['explained']['text']}"
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

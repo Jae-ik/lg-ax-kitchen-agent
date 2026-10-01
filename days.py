@@ -53,6 +53,7 @@ def run_days(pid: str, n: int = 3, carry: bool = True) -> list:
     first = {x["name"]: dict(x) for x in base["fridge"]}
     real = None                       # 실제 냉장고(상비품 포함) — 어느 쪽이든 줄어든다
     cookware = base.get("cookware_history")
+    known = set()
     out = []
     for day in range(1, n + 1):
         p = dict(base)
@@ -73,6 +74,8 @@ def run_days(pid: str, n: int = 3, carry: bool = True) -> list:
                                    {"qty_g": r["qty_g"], "stored_days": r.get("stored_days")})
                 # 상비품은 첫날 설정(참기름 바닥)을 그대로 믿는다 — 어제 산 것을 모른다
             p["cookware_history"] = cookware
+            if carry:
+                p["purchase_history"] = sorted(known)       # 장부: 산 적 있는 것도 넘긴다
         bought, touched, used = [], [], {}
         orig, orig_w = K.fridge_add, K.prep_weigh
 
@@ -118,6 +121,7 @@ def run_days(pid: str, n: int = 3, carry: bool = True) -> list:
             end = fixed
         real = _age(end)
         cookware = [dict(c) for c in K.COOKWARE]
+        known = set(K.KNOWN)
         got = sorted(set(bought))
         # 금액: 자동 주문뿐 아니라 승인해서 산 것까지 — 기준가 × 1개(추정)
         cost = sum(store.BASE_PRICE.get(b, 0) for b in got)

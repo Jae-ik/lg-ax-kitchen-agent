@@ -72,7 +72,14 @@ _MODE_CUES = (
     ("auto", r"알아서\s*[^.,]{0,4}?(시켜|주문|사|장)"),
 )
 _HANGUL_NUM = {"한": 1, "하나": 1, "혼자": 1, "둘": 2, "두": 2, "셋": 3,
-               "세": 3, "넷": 4, "네": 4, "다섯": 5, "여섯": 6}
+               "세": 3, "넷": 4, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7,
+               "여덟": 8, "아홉": 9}
+# 말로 한 양. "두부 반 모", "닭고기 200g", "계란 3개" — 전엔 모두 300g 으로 가정했다.
+# 단위 무게는 **대표값 가정**이다.
+UNIT_G = {("두부", "모"): 300, ("배추", "포기"): 2000, ("배추", "통"): 2000,
+          ("무", "개"): 1500, ("양파", "개"): 200, ("계란", "개"): 60, ("달걀", "개"): 60,
+          ("계란", "알"): 60, ("달걀", "알"): 60, ("애호박", "개"): 300, ("대파", "단"): 500}
+_QTY_WORD = {"반": 0.5, "한": 1, "하나": 1, "두": 2, "세": 3, "네": 4}
 _DEFAULT = {
     "id": "thinq", "label": "대화로 받은 상황", "household_size": 1,
     "arrive_home": "19:00", "time_budget_min": 45, "next_morning_rush": False,
@@ -287,17 +294,25 @@ def rule_understand(text: str, now: str | None = None) -> dict:
             why.append(f"'{(m or m_now).group(0)}' — 지금이 몇 시인지 몰라 "
                        f"퇴근 시각을 정하지 않았다")
 
-    m = re.search(r"(\d)\s*(명|인|식구)", text)
+    # 두 자리도 읽는다 — "12명" 을 "2명" 으로, "열두 명" 을 "두 명" 으로 읽었다
+    # (2026-10-01). 숫자 앞이 숫자면 잘린 것이다.
+    m = re.search(r"(?<!\d)(\d{1,2})\s*(명|식구|인(?!분))", text)
     if m:
         got["household_size"] = int(m.group(1))
         why.append(f"'{m.group(0)}' → {m.group(1)}인")
     else:
-        # "넷이 먹을" 처럼 한글로 말하는 쪽이 더 흔하다
-        m = re.search(r"(한|하나|혼자|둘|두|셋|세|넷|네|다섯|여섯)\s*"
-                      r"(명|이서|이|식구|가족)", text)
-        if m and m.group(1) in _HANGUL_NUM:
-            got["household_size"] = _HANGUL_NUM[m.group(1)]
-            why.append(f"'{m.group(0)}' → {_HANGUL_NUM[m.group(1)]}인")
+        # "넷이 먹을" 처럼 한글로 말하는 쪽이 더 흔하다. '열' 이 붙으면 십 단위다.
+        m = next((x for x in re.finditer(
+            r"(열\s*)?(한|하나|혼자|둘|두|셋|세|넷|네|다섯|여섯|일곱|여덟|아홉)?\s*"
+            r"(명|이서|이|식구|가족)", text) if x.group(1) or x.group(2)), None)
+        if m and (m.group(2) in _HANGUL_NUM or m.group(2) is None):
+            n = (10 if m.group(1) else 0) + (_HANGUL_NUM.get(m.group(2), 0) if m.group(2) else 0)
+            if n:
+                got["household_size"] = n
+                why.append(f"'{m.group(0).strip()}' → {n}인")
+        if "household_size" not in got and re.search(r"혼자", text):
+            got["household_size"] = 1                 # "혼자 먹어" — 뒤에 명·이가 없다
+            why.append("'혼자' → 1인")
 
     # 기피 재료를 **먼저** 읽는다. 그래야 그것이 재고로 들어가지 않는다.
     avoid = []
@@ -328,8 +343,14 @@ def rule_understand(text: str, now: str | None = None) -> dict:
         if gone:
             why.append(f"없다고 읽음: {', '.join(gone)}")
         if found:
-            got["fridge"] = [{"name": f} for f in found]
-            why.append(f"재료로 읽음: {', '.join(found)} (양은 가정, 보관일은 모름)")
+            got["fridge"] = []
+            for f in found:
+                q = _qty_after(text, f)
+                got["fridge"].append({"name": f, **({"qty_g": q} if q else {})})
+            said = [f"{x['name']} {x['qty_g']}g" for x in got["fridge"] if "qty_g" in x]
+            why.append(f"재료로 읽음: {', '.join(found)}"
+                       + (f" (말한 양: {', '.join(said)})" if said else "")
+                       + " (나머지 양은 가정, 보관일은 모름)")
 
     # 오늘의 주문 방식. **직접 사겠다** 를 먼저 본다 — "알아서 시키지 말고
     # 내가 사 갈게" 처럼 둘이 섞이면 사람이 하겠다는 쪽이 이긴다.
@@ -405,6 +426,23 @@ def _foods_in(text: str, avoid: list) -> tuple:
     return found, list(dict.fromkeys(gone))
 
 
+def _qty_after(text: str, food: str):
+    """재료 바로 뒤의 양을 읽는다. 못 읽으면 None(가정은 호출자가 한다)."""
+    i = text.find(food)
+    if i < 0:
+        return None
+    rest = text[i + len(food):i + len(food) + 10]
+    m = re.match(r"\s*(\d+(?:\.\d+)?)\s*(kg|킬로|g|그램)", rest)
+    if m:
+        v = float(m.group(1))
+        return round(v * 1000 if m.group(2) in ("kg", "킬로") else v)
+    m = re.match(r"\s*(\d+|반|한|하나|두|세|네)\s*(모|개|알|포기|통|단)", rest)
+    if m and (food, m.group(2)) in UNIT_G:
+        n = float(m.group(1)) if m.group(1).isdigit() else _QTY_WORD[m.group(1)]
+        return round(n * UNIT_G[(food, m.group(2))])
+    return None
+
+
 def _friction_from(text: str) -> list:
     """말속에서 '수고' 를 집는다. 하나도 못 집으면 빈 목록이다 —
     situation_read 가 그 경우 성립으로 세지 않는다."""
@@ -433,7 +471,9 @@ PROFILE_KEYS = ("order_mode", "auto_limit_krw",
                 "order_cap_krw", "location_auto_order",
                 "avoid", "max_sodium_mg",
                 # 3 외부 LLM 전송 동의 · 4 결제 권한자 (2026-10-01)
-                "llm_consent", "payers")
+                "llm_consent", "payers",
+                # 가구의 구매 이력(장부) — "처음 사는 품목" 판단에 쓴다. 말로는 못 바꾼다
+                "purchase_history")
 PREF_KEYS = ("eat_min", "shop_detour_min", "shop_trip_min",
              "order_cap_krw", "location_auto_order")
 # **안전 항목도 가구가 저장한다**(2026-10-01). 전에는 "말할 때마다 승인" 이라며
@@ -443,7 +483,7 @@ SAFETY_KEYS = ("avoid", "max_sodium_mg")
 # 돈·동의·가정값 설정은 **말로 바꾸지 않는다.** LLM 경로로 "이십만원까지 사"
 # 가 자동 주문 상한을, "위치 써도 돼" 가 위치 동의를 바꿨다(2026-10-01) —
 # 아이 말·잘못 들은 말·끼어든 문장으로 돈과 동의가 바뀐다. 설정에서만 바꾼다.
-SETTINGS_ONLY = ("llm_consent", "payers",
+SETTINGS_ONLY = ("llm_consent", "payers", "purchase_history",
                  "auto_limit_krw", "location_consent", "leave_window",
                  "location_dwell_min", "eat_min", "shop_detour_min", "shop_trip_min",
                  "order_cap_krw", "location_auto_order")
@@ -594,6 +634,9 @@ _PII = [
     (r"(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)"
      r"\S*\s+\S+(구|군|시)\s+\S+(로|길|동)\s*\d[\d-]*(번길\s*\d+)?", "[주소]"),
     (r"(이름은|성함은|이름이)\s*\S+", r"\1 [이름]"),
+    # 도시 없이 말하는 주소("마포구 월드컵로 12")·동호수 — 10/1 점검에서 새어 나갔다
+    (r"\S+(구|군)\s+\S+(로|길)\s*\d[\d-]*(번길\s*\d+)?", "[주소]"),
+    (r"\d{1,4}\s*동\s*\d{1,5}\s*호", "[동호수]"),
 ]
 
 
@@ -650,6 +693,7 @@ def _validate(fields: dict):
         "order_cap_krw": (int, lambda v: 0 <= v <= 500000),
         "llm_consent": (bool, lambda v: True),
         "payers": (list, lambda v: all(isinstance(x, str) and x for x in v)),
+        "purchase_history": (list, lambda v: all(isinstance(x, str) and x for x in v)),
         "location_auto_order": (bool, lambda v: True),
         "shop_detour_min": (int, lambda v: 0 <= v <= 90),
         "shop_trip_min": (int, lambda v: 0 <= v <= 120),
@@ -794,15 +838,52 @@ def rule_explain(result: dict) -> str:
         bits.append(str(m["조달 대기"]))
     if m.get("세척 코스"):
         bits.append(f"세척은 {m['세척 코스']}")
+    asked = asked_list(m)
     if v.get("user_touches"):
-        ask = m.get("확인 요청")
-        bits.append(f"확인이 필요한 것이 {v['user_touches']}건 있습니다"
-                    + (f" ({'; '.join(ask)})" if ask else ""))
+        # 개입 수와 목록이 같아야 한다 — 전엔 구매 확인만 나열해 "4건(3개 나열)" 이었다
+        bits.append(f"물어본 것이 {v['user_touches']}건 있습니다 ({'; '.join(asked)})"
+                    if len(asked) == v["user_touches"] else
+                    f"물어본 것이 {v['user_touches']}건 있습니다")
     else:
         bits.append("따로 물을 것은 없습니다")
     if not v.get("verified"):
         bits.append("**아직 시나리오를 다 채우지는 못했습니다**")
-    return " · ".join(bits)
+    notes = must_tell(m)
+    return " · ".join(bits) + (" · 꼭 알릴 것: " + " / ".join(notes) if notes else "")
+
+
+def asked_list(m: dict) -> list:
+    """사람에게 물은 것 — 개입 수를 이루는 것 전부."""
+    out = list(m.get("확인 요청") or [])
+    if "물음" in str(m.get("재고 확인", "")):
+        out.append("냉장고에 있는지 확인")
+    if "씻은 기록이 없다" in str(m.get("도구 확인", "")):
+        out.append("냄비를 씻었는지 확인")
+    out += [i for i in (m.get("주문 사고") or []) if "물어" in i]
+    return out
+
+
+def must_tell(m: dict) -> list:
+    """설명이 무엇이든 **반드시** 사용자에게 가야 하는 것 — 안전·돈·계획 변경.
+
+    10/1 점검: 넣은 날 모름(냄새·색 확인)·씻지 않은 냄비·버린 재료·주문 사고·집에서
+    다시 짬은 결과에만 남고 메시지로는 나가지 않았다. LLM 설명도 빠뜨릴 수 있다.
+    """
+    out = []
+    if m.get("넣은 날 모름"):
+        out.append(str(m["넣은 날 모름"]))
+    if "씻은 기록이 없다" in str(m.get("도구 확인", "")):
+        out.append(str(m["도구 확인"]))
+    for k in ("버리고 바꿈", "폐기 대상", "주문 사고", "오늘 못 받음", "앞선 계획에서 이미 주문한 것"):
+        if m.get(k):
+            v = m[k]
+            out.append(f"{k}: " + ("; ".join(map(str, v)) if isinstance(v, list) else str(v)))
+    for k in ("다시 짠 곳", "주문 방식 조정"):
+        if m.get(k):
+            out.append(str(m[k]))
+    if "시연" in str(m.get("승인", "")):
+        out.append("승인은 시연용 가정이다 — 실제로는 묻고 기다린다")
+    return out
 
 
 EXPLAIN_PROMPT = """아래는 주방 에이전트가 실제로 실행한 결과다.
@@ -824,8 +905,20 @@ def explain(result: dict, ask=None) -> dict:
 
     data = json.dumps({k: m[k] for k in sorted(m)}, ensure_ascii=False,
                       indent=1)
-    text = (ask(EXPLAIN_PROMPT.replace("{data}", data)) or "").strip()
+    try:
+        text = (ask(EXPLAIN_PROMPT.replace("{data}", data)) or "").strip()
+    except Exception as e:
+        # 설명 단계에서 LLM 이 죽어도 실행 결과를 버리지 않는다 — 규칙으로 설명한다.
+        # 전엔 여기서 예외가 올라가 다 끝난 실행이 통째로 사라졌다(10/1).
+        return {"text": rule_explain(result), "by": f"규칙(LLM 실패: {type(e).__name__})",
+                "invented": []}
+    if not text:
+        return {"text": rule_explain(result), "by": "규칙(LLM 빈 답)", "invented": []}
     invented = _invented_numbers(text, m)
+    # LLM 이 무엇을 쓰든 안전·돈·계획 변경은 **덧붙여** 반드시 알린다
+    notes = must_tell(m)
+    if notes:
+        text += " · 꼭 알릴 것: " + " / ".join(notes)
     return {"text": text, "by": "LLM", "invented": invented}
 
 

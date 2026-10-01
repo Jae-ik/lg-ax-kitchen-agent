@@ -17,7 +17,7 @@ import sys
 
 import kitchen as K
 import personas
-from kitchen_domain import (KITCHEN_TERMS, build_tasks, domain_goal,
+from kitchen_domain import (KNOWN_ITEMS, KITCHEN_TERMS, build_tasks, domain_goal,
                             kitchen_beats, make_executor, pantry_stock,
                             pantry_refill)
 from planner import Task, plan as make_plan
@@ -116,6 +116,7 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
     K.reset(_sourced(p) + pantry_stock(low), seed=seed_val,
             keep_records=keep_records)
     K.cookware_reset(p.get("cookware_history"))
+    K.known_reset(p.get("purchase_history", KNOWN_ITEMS))
 
     trace.stage("GOAL", f"{p['label']}의 수고를 줄이는 UX 시나리오를 만들고 "
                         f"실행으로 검증한다",
@@ -180,6 +181,7 @@ def design_for(pid: str, trace: Trace, seed: int = 7,
         K.reset(_sourced(p) + pantry_stock(low), seed=seed_val,
                 keep_records=True)
         K.cookware_reset(p.get("cookware_history"))
+        K.known_reset(p.get("purchase_history", KNOWN_ITEMS))
         ctx["constraints"] = constraints
         ctx["executor"] = make_executor(REGISTRY, seed_ctx=seed)
         run_steps([t for t in dp.steps if t.skill != "situation_read"])
