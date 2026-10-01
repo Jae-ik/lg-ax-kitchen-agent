@@ -1078,6 +1078,39 @@ def t5b_raw():
     return ok, f"우유 → 카레가루 '{a[0].get('카레가루')}' · 새우 → 맛술 '{b[0].get('맛술')}' · 없음 → 맛술 자동"
 
 
+# ── 16 남은 위험 6 — 주문 사고 (2026-10-01) ─────────────────────────────
+@check("6a 배송 지연은 이동 시간 안이면 묻히고, 넘치면 집에서 기다린 만큼 늦는다")
+def u6a_late():
+    import delivery_gap as D
+    base, a, b = D.run("p2_맞벌이"), D.run("p2_맞벌이", {"두부": {"late_min": 10}}), \
+        D.run("p2_맞벌이", {"두부": {"late_min": 40}})
+    ok = (a["meal_min"] == base["meal_min"]
+          and abs(b["meal_min"] - base["meal_min"] - 30) < 0.05)   # 40 − (이동 37 − 배송 27)
+    return ok, f"기본 {base['meal_min']} · 10분 지연 {a['meal_min']} · 40분 지연 {b['meal_min']}분"
+
+
+@check("6b 집에서 안 사고로는 퇴근길부터 다시 짜지 않는다 — 시간을 되돌리지 않는다")
+def u6b_no_time_travel():
+    import delivery_gap as D
+    r = D.run("p3_알레르기", {"찹쌀": {"late_min": 40}})
+    # 전에는 집에서 알고도 "퇴근길에 다른 재료를 주문" 해 16.1분이 나왔다
+    ok = r["meal_min"] is not None and r["meal_min"] > 40
+    return ok, f"알레르기 가구 찹쌀 40분 지연 → {r['menu']} {r['meal_min']}분"
+
+
+@check("6c 결제 실패·상점 취소는 알게 된 때 묻고, 거절하면 사지 않는다")
+def u6c_fail():
+    import delivery_gap as D
+    pay_y = D.run("p4_퇴근길", {"두부": {"payment_fail": True}}, True)
+    pay_n = D.run("p4_퇴근길", {"두부": {"payment_fail": True}}, False)
+    can_y = D.run("p4_퇴근길", {"두부": {"cancelled": True}}, True)
+    ok = (pay_y["verified"] and pay_y["touches"] == 1 and not pay_n["verified"]
+          and can_y["verified"] and can_y["meal_min"] > pay_y["meal_min"]
+          and any("들러" in i for i in can_y["issues"]))
+    return ok, (f"결제 실패·승인 {pay_y['meal_min']}분(개입 {pay_y['touches']}) · 거절 → 실패 · "
+                f"취소·들러 사 줌 {can_y['meal_min']}분")
+
+
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")
 def e5():
     """재료 투입·뚜껑·젓기는 사람이 한다(제안서 표1)."""

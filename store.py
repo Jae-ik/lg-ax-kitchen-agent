@@ -225,6 +225,25 @@ def pack_of(item: str) -> int:
     return 300                                   # 모르면 300g(가정)
 
 
+# ── 주문이 실제로 어떻게 되는가 (2026-10-01) ──────────────────────────
+# 전에는 주문하면 **늘 제시간에 왔다.** 선제 주문이 제안의 핵심인데 그 가장 약한
+# 가정이었다. 시험에서 실제 결과를 넣는다(belief_gap 의 냉장고처럼):
+#   {"payment_fail": True}  결제 실패 — 주문하는 순간 안다
+#   {"cancelled": True}     상점이 취소(포장 중 품절 등) — 주문 뒤 CANCEL_NOTICE_MIN 분에 안다
+#   {"late_min": N}         N분 늦게 온다 — 도착할 때 안다
+ORDER_REALITY: dict = {}
+CANCEL_NOTICE_MIN = 10     # 상점이 취소를 알려 오는 시점(가정)
+
+
+def set_order_reality(reality: dict | None) -> None:
+    ORDER_REALITY.clear()
+    ORDER_REALITY.update(reality or {})
+
+
+def order_outcome(item: str) -> dict:
+    return dict(ORDER_REALITY.get(item, {}))
+
+
 def make_lookup(stores=None):
     """품목 하나에 대해 모든 상점의 조건을 돌려주는 함수를 만든다.
 

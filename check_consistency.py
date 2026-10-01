@@ -176,6 +176,29 @@ def c5g():
     return "\n".join(bad)
 
 
+@check("README 의 주문 사고 표가 실제 실행과 같은가")
+def c5o():
+    import json
+    import os
+    if not os.path.exists("delivery_gap.json"):
+        return "delivery_gap.json 이 없다 — delivery_gap.py 를 먼저 돌려야 한다"
+    rows = json.load(open("delivery_gap.json", encoding="utf-8"))
+    doc = io.open("README.md", encoding="utf-8").read().splitlines()
+    labels = {"p2_맞벌이": "맞벌이 2인 (두부)", "p3_알레르기": "알레르기 4인 (찹쌀)",
+              "p4_퇴근길": "퇴근길 1인 (두부)"}
+    bad = []
+    for pid, lab in labels.items():
+        line = next((l for l in doc if l.startswith(f"| {lab} |")), None)
+        if line is None:
+            bad.append(f"README 에 '{lab}' 줄이 없다")
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")][1:]
+        got = [r["label"] for r in rows if r["persona"] == pid]
+        if cells != got:
+            bad.append(f"{lab}: 실행 {got} 인데 README {cells}")
+    return "\n".join(bad)
+
+
 @check("README 의 가정값 민감도 문장이 실제 실행과 같은가")
 def c5s():
     """남은 약점 표(9/30)의 경계값 — 가정값이나 모델을 바꾸면 낡는다."""

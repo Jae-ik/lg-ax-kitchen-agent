@@ -37,6 +37,7 @@ REGEN = [
     ("measure_variance.py", "시드를 바꿔 200회씩 돌려 variance.json 을 만든다"),
     # README 의 '믿는 재고가 틀리면' 표를 check_consistency 가 이 파일로 대조한다
     ("belief_gap.py", "믿는 재고와 실제가 다를 때를 재 belief_gap.json 을 만든다"),
+    ("delivery_gap.py", "주문 사고(결제 실패·취소·지연)를 재 delivery_gap.json 을 만든다"),
 ]
 
 # (스크립트, 무엇을 지키는가, **깨졌을 때 무엇부터 보는가**)

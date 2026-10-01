@@ -1,0 +1,230 @@
+[
+ {
+  "persona": "p2_맞벌이",
+  "item": "두부",
+  "case": "결제 실패 · 다시 승인",
+  "label": "성립 11.8분 · 개입 0→1",
+  "issues": [
+   "두부: 결제 실패 → 다른 결제수단으로 다시 주문할지 물어 승인받았다"
+  ],
+  "verified": true,
+  "meal_min": 11.8,
+  "base_meal_min": 11.8,
+  "touches": 1
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "두부",
+  "case": "결제 실패 · 거절",
+  "label": "저녁 실패",
+  "issues": [
+   "두부: 결제 실패 — 다시 하지 않아 못 샀다"
+  ],
+  "verified": false,
+  "meal_min": null,
+  "base_meal_min": 11.8,
+  "touches": 1
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "두부",
+  "case": "상점 취소 · 들러 사 줌",
+  "label": "성립 26.8분 · 개입 0→1",
+  "issues": [
+   "두부: 상점이 주문 10분 뒤 취소 → 퇴근길에 들러 사 달라고 물어 승인받았다(+15분, 가정)"
+  ],
+  "verified": true,
+  "meal_min": 26.8,
+  "base_meal_min": 11.8,
+  "touches": 1
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "두부",
+  "case": "상점 취소 · 거절",
+  "label": "저녁 실패",
+  "issues": [
+   "두부: 상점이 취소했다 — 들를 수 없어 못 받았다"
+  ],
+  "verified": false,
+  "meal_min": null,
+  "base_meal_min": 11.8,
+  "touches": 1
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "두부",
+  "case": "배송 10분 지연",
+  "label": "성립 11.8분",
+  "issues": [
+   "두부: 배송이 10분 늦었다 — 이동 시간 안에 묻혔다"
+  ],
+  "verified": true,
+  "meal_min": 11.8,
+  "base_meal_min": 11.8,
+  "touches": 0
+ },
+ {
+  "persona": "p2_맞벌이",
+  "item": "두부",
+  "case": "배송 40분 지연",
+  "label": "성립 41.8분",
+  "issues": [
+   "두부: 배송이 40분 늦었다 — 집에서 30분 더 기다렸다"
+  ],
+  "verified": true,
+  "meal_min": 41.8,
+  "base_meal_min": 11.8,
+  "touches": 0
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "찹쌀",
+  "case": "결제 실패 · 다시 승인",
+  "label": "성립 32.2분 · 개입 2→3",
+  "issues": [
+   "찹쌀: 결제 실패 → 다른 결제수단으로 다시 주문할지 물어 승인받았다"
+  ],
+  "verified": true,
+  "meal_min": 32.2,
+  "base_meal_min": 32.2,
+  "touches": 3
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "찹쌀",
+  "case": "결제 실패 · 거절",
+  "label": "저녁 실패",
+  "issues": [],
+  "verified": false,
+  "meal_min": null,
+  "base_meal_min": 32.2,
+  "touches": 2
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "찹쌀",
+  "case": "상점 취소 · 들러 사 줌",
+  "label": "성립 47.2분 · 개입 2→3",
+  "issues": [
+   "찹쌀: 상점이 주문 10분 뒤 취소 → 퇴근길에 들러 사 달라고 물어 승인받았다(+15분, 가정)"
+  ],
+  "verified": true,
+  "meal_min": 47.2,
+  "base_meal_min": 32.2,
+  "touches": 3
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "찹쌀",
+  "case": "상점 취소 · 거절",
+  "label": "저녁 실패",
+  "issues": [],
+  "verified": false,
+  "meal_min": null,
+  "base_meal_min": 32.2,
+  "touches": 2
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "찹쌀",
+  "case": "배송 10분 지연",
+  "label": "성립 32.2분",
+  "issues": [
+   "찹쌀: 배송이 10분 늦었다 — 이동 시간 안에 묻혔다"
+  ],
+  "verified": true,
+  "meal_min": 32.2,
+  "base_meal_min": 32.2,
+  "touches": 2
+ },
+ {
+  "persona": "p3_알레르기",
+  "item": "찹쌀",
+  "case": "배송 40분 지연",
+  "label": "성립 48.1분 · 메뉴 변경(된장찌개) · 개입 2→3",
+  "issues": [],
+  "verified": true,
+  "meal_min": 48.1,
+  "base_meal_min": 32.2,
+  "touches": 3
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "두부",
+  "case": "결제 실패 · 다시 승인",
+  "label": "성립 9.5분 · 개입 0→1",
+  "issues": [
+   "두부: 결제 실패 → 다른 결제수단으로 다시 주문할지 물어 승인받았다"
+  ],
+  "verified": true,
+  "meal_min": 9.5,
+  "base_meal_min": 9.5,
+  "touches": 1
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "두부",
+  "case": "결제 실패 · 거절",
+  "label": "저녁 실패",
+  "issues": [
+   "두부: 결제 실패 — 다시 하지 않아 못 샀다"
+  ],
+  "verified": false,
+  "meal_min": null,
+  "base_meal_min": 9.5,
+  "touches": 1
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "두부",
+  "case": "상점 취소 · 들러 사 줌",
+  "label": "성립 24.5분 · 개입 0→1",
+  "issues": [
+   "두부: 상점이 주문 10분 뒤 취소 → 퇴근길에 들러 사 달라고 물어 승인받았다(+15분, 가정)"
+  ],
+  "verified": true,
+  "meal_min": 24.5,
+  "base_meal_min": 9.5,
+  "touches": 1
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "두부",
+  "case": "상점 취소 · 거절",
+  "label": "저녁 실패",
+  "issues": [
+   "두부: 상점이 취소했다 — 들를 수 없어 못 받았다"
+  ],
+  "verified": false,
+  "meal_min": null,
+  "base_meal_min": 9.5,
+  "touches": 1
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "두부",
+  "case": "배송 10분 지연",
+  "label": "성립 9.5분",
+  "issues": [
+   "두부: 배송이 10분 늦었다 — 이동 시간 안에 묻혔다"
+  ],
+  "verified": true,
+  "meal_min": 9.5,
+  "base_meal_min": 9.5,
+  "touches": 0
+ },
+ {
+  "persona": "p4_퇴근길",
+  "item": "두부",
+  "case": "배송 40분 지연",
+  "label": "예산 초과 36.5/25분",
+  "issues": [
+   "두부: 배송이 40분 늦었다 — 집에서 27분 더 기다렸다"
+  ],
+  "verified": false,
+  "meal_min": 36.5,
+  "base_meal_min": 9.5,
+  "touches": 0
+ }
+]

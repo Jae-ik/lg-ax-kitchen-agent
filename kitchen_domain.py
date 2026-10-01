@@ -669,6 +669,50 @@ def _exclude(rid):
                           + [rid])
 
 
+# 집에서 쓰는 단계 — 여기서 막혔으면 집에서 알았다
+HOME_STAGES = ("prep", "converge", "aftercare")
+
+
+def found_at_home(constraints: dict, verify: dict):
+    """막힌 것을 **집에서** 알았으면 그때까지 쓴 분, 아니면 None.
+
+    재계획은 원래 "나서기 전에 미리 돌려 보는" 것이다. 퇴근길에 안 실패(결제 실패·
+    상점 취소)는 퇴근길부터 다시 짜도 되지만, 집에서 안 실패(배송 지연·계량 때 부족)를
+    알고 퇴근길부터 다시 짜면 **그때 알 수 없던 정보로 시간을 되돌리는** 것이다 —
+    배송 40분 지연을 집에서 알고도 "퇴근길에 다른 재료를 주문해 16.1분" 이 나왔다
+    (2026-10-01, belief_gap 에서 측정 쪽만 막아 두었던 것이 본체에 남아 있었다).
+    """
+    m = verify.get("metrics", {})
+    d = m.get("발견 시점")
+    if d and d.startswith("귀가 후"):
+        try:
+            return int(d.split("귀가 후 ")[1].split("분")[0])
+        except (IndexError, ValueError):
+            return 0
+    if d and d.startswith("퇴근길"):
+        return None
+    if verify.get("halted_at") in HOME_STAGES:
+        # 재고 확인·메뉴(귀가 뒤에 했으면 5분) + 계량(4분)
+        return (0 if constraints.get("preorder") else 5) + 4
+    return None
+
+
+def _exclude_at(rid, constraints, verify):
+    """다른 메뉴로 — 집에서 알았으면 **집에서, 그 시각부터** 다시 짠다."""
+    elapsed = found_at_home(constraints, verify)
+    if elapsed is None:
+        return _exclude(rid)
+
+    def apply(c):
+        c = _exclude(rid)(c)
+        left = (c.get("time_budget_min") or 0) - elapsed
+        return dict(c, preorder=False, home_elapsed_min=elapsed,
+                    commute_min=0, leave_source=None,
+                    # 남은 시간 안에 와야 한다 — 새로 주문하면 집에서 기다린다
+                    budget_min=max(0, left))
+    return apply
+
+
 def diagnose(constraints: dict, verify: dict) -> list:
     """막힌 원인을 풀 수 있는 것과 없는 것으로 나눠 돌려준다."""
     m = verify.get("metrics", {})
@@ -685,18 +729,22 @@ def diagnose(constraints: dict, verify: dict) -> list:
                           m.get("메뉴 없음") or m.get("중단") or "메뉴를 정하지 못했다"))
         return out
     if halted and rid:
+        home = found_at_home(constraints, verify)
         out.append(_cause(f"exclude:{rid}", True,
-                          f"{menu}({rid})로는 {halted} 에서 막혔다 — 다른 메뉴로 다시 짠다",
-                          _exclude(rid)))
+                          f"{menu}({rid})로는 {halted} 에서 막혔다 — 다른 메뉴로 다시 짠다"
+                          + (f" (집에서 알았다 — 귀가 후 {home}분부터)" if home is not None else ""),
+                          _exclude_at(rid, constraints, verify)))
         return out
     if halted:
         return [_cause(f"halt:{halted}", False, m.get("중단") or f"{halted} 에서 멈췄다")]
     if verify.get("over_budget") and rid:
+        home = found_at_home(constraints, verify)
         out.append(_cause(
             f"exclude:{rid}", True,
             f"{menu}({rid})는 {verify.get('spent_min')}분으로 예산 "
-            f"{verify.get('budget_min')}분을 넘는다 — 더 빨리 되는 메뉴를 찾는다",
-            _exclude(rid)))
+            f"{verify.get('budget_min')}분을 넘는다 — 더 빨리 되는 메뉴를 찾는다"
+            + (f" (집에서 알았다 — 귀가 후 {home}분부터)" if home is not None else ""),
+            _exclude_at(rid, constraints, verify)))
     return out
 
 
@@ -768,6 +816,8 @@ def build_tasks(constraints: dict) -> list:
         # 보관 확인 단계에서 **확신이 낮은 재고만** 사람에게 한 번 묻는다.
         # 퇴근 시각을 알면 퇴근길 메시지로, 모르면 집에서. 답으로 믿음을 고친
         # 뒤에 임박·메뉴를 판단한다 — 계량 때(집, 너무 늦게) 알던 것을 앞당긴다.
+        # 결과를 모으는 execute 는 constraints 를 못 본다 — 여기서 ctx 로 옮긴다
+        ctx["home_elapsed_min"] = constraints.get("home_elapsed_min")
         ask = unsure_stock(K.fridge_list_items())
         if ask:
             fixed = K.confirm_stock(ask)
@@ -918,8 +968,72 @@ def build_tasks(constraints: dict) -> list:
         # 시뮬레이터에서는 도착을 기다린 것으로 보고 그 시간을 기록한다 —
         # 실제 기기라면 도착 알림을 받고 시작해야 한다.
         eta = out.get("arrive_in_min", 0)
+        approver = ctx.get("approve_purchase")
+        pre = constraints.get("preorder")
+        ctx.setdefault("order_issues", [])
+
+        def ask_person(names):
+            """사람에게 묻는다. 승인 함수가 없으면 시연 — 동의를 가정한다."""
+            ctx["touches"] = ctx.get("touches", 0) + 1
+            if approver is None:
+                return True
+            try:
+                said = approver(list(names))
+            except Exception:
+                return False
+            return said is True or bool(set(said or []) & set(names))
+
+        def deliver(name, qty, item_eta):
+            """주문 하나가 실제로 어떻게 되는지 받아, **알게 되는 시점에** 대응한다.
+
+            결제 실패는 주문하는 순간, 상점 취소는 주문 뒤 10분(가정), 지연은 도착할 때
+            안다. 전에는 주문하면 늘 제시간에 왔다(2026-10-01).
+            """
+            oc = store.order_outcome(name)
+            if oc.get("payment_fail"):
+                if ask_person([name]):
+                    ctx["order_issues"].append(f"{name}: 결제 실패 → 다른 결제수단으로 다시 "
+                                               f"주문할지 물어 승인받았다")
+                else:
+                    ctx["order_issues"].append(f"{name}: 결제 실패 — 다시 하지 않아 못 샀다")
+                    return False
+            if oc.get("cancelled"):
+                # 즉시배송 상점이 하나뿐이라 다른 곳에서 제시간에 받을 수 없다.
+                # 퇴근길이면 들러서 사 달라고 묻는다(들르는 시간이 든다).
+                left = (constraints.get("commute_min") or 0) - store.CANCEL_NOTICE_MIN
+                if pre and left > 0 and ask_person([name]):
+                    detour = ((constraints.get("prefs") or {}).get("shop_detour_min")
+                              or store.SHOP_DETOUR_MIN)
+                    ctx["shop_min"] = max(ctx.get("shop_min", 0), detour)
+                    K.fridge_add(name, qty)
+                    ctx["order_issues"].append(
+                        f"{name}: 상점이 주문 {store.CANCEL_NOTICE_MIN}분 뒤 취소 → 퇴근길에 "
+                        f"들러 사 달라고 물어 승인받았다(+{detour}분, 가정)")
+                    return True
+                ctx["order_issues"].append(
+                    f"{name}: 상점이 취소했다 — " + ("집에 와서 알았다" if not pre else
+                                                  "들를 수 없어") + " 못 받았다")
+                return False
+            K.fridge_add(name, qty)
+            late = oc.get("late_min", 0)
+            if late:
+                slack = ((constraints.get("commute_min") or 0) - item_eta) if pre else 0
+                extra = max(0, late - max(0, slack))
+                ctx["late_wait_min"] = max(ctx.get("late_wait_min", 0), extra)
+                if extra:
+                    ctx["discovery"] = "귀가 후 0분 — 배송 추적이 늦는다고 알렸다"
+                ctx["order_issues"].append(
+                    f"{name}: 배송이 {late}분 늦었다 — "
+                    + (f"집에서 {extra}분 더 기다렸다" if extra else "이동 시간 안에 묻혔다"))
+            return True
+
+        delivered = []
         for a in out["auto_ordered"]:
-            K.fridge_add(a["name"], qty_for(a["name"], a.get("packs"), a.get("pack_g")))
+            if deliver(a["name"], qty_for(a["name"], a.get("packs"), a.get("pack_g")),
+                       a.get("delivery_min", eta)):
+                delivered.append(a["name"])
+        out = dict(out, auto_ordered=[a for a in out["auto_ordered"]
+                                      if a["name"] in delivered])
         # 직접 장보기: 사람이 사 온다. 기다림은 없지만 **들른 시간**이 든다
         # (가정 — store.SHOP_DETOUR_MIN / SHOP_TRIP_MIN).
         ctx["order_mode"] = out.get("mode")
@@ -927,12 +1041,13 @@ def build_tasks(constraints: dict) -> list:
             for sb in out["self_buy"]:
                 K.fridge_add(sb["name"], qty_for(sb["name"], sb.get("packs"), sb.get("pack_g")))
             ctx["self_buy"] = [sb["name"] for sb in out["self_buy"]]
-            ctx["shop_min"] = constraints.get("self_shop_min", 0)
+            ctx["shop_min"] = max(ctx.get("shop_min", 0), constraints.get("self_shop_min", 0))
             ctx["delivery_note"] = (
                 f"퇴근길에 직접 샀다 — 들른 시간 {ctx['shop_min']}분(가정)"
                 if constraints.get("preorder") else
                 f"집에 와서 직접 다녀왔다 — {ctx['shop_min']}분(가정)")
-        ctx["order_krw"] = out["total_krw"]
+        # 못 받은 주문(결제 실패·취소)은 돈이 나가지 않는다 — 받은 것만 센다
+        ctx["order_krw"] = sum(a["price_krw"] for a in out["auto_ordered"])
         ctx["order_eta_min"] = eta
         if out["auto_ordered"]:
             # 집에 없는 동안 주문했으면(선제 주문) 그 시간이 이동 시간에
@@ -963,7 +1078,6 @@ def build_tasks(constraints: dict) -> list:
         # **승인은 사람이 한다.** 실제 사용 경로(thinq)는 승인 함수를 주입하고,
         # 시연(run_design)만 "동의했다고 가정" 한다. 전에는 thinq 도 가정해서
         # 실제 사용자에게 묻지 않고 돈을 썼다(2026-10-01).
-        approver = ctx.get("approve_purchase")
         asking = [c["name"] for c in out["need_confirm"] if not c.get("safety")]
         if approver is not None and asking:
             try:
@@ -994,13 +1108,22 @@ def build_tasks(constraints: dict) -> list:
             if a_eta is None or (deadline is not None and a_eta > deadline):
                 late.append(f"{name}({'구할 곳 없음' if a_eta is None else f'{a_eta}분'})")
                 continue
-            K.fridge_add(name, qty_for(name))
+            if not deliver(name, qty_for(name), a_eta):
+                late.append(f"{name}(주문 사고 — 못 받았다)")
+                continue
             approved.append(name)
             if not pre:
                 ctx["wait_for_delivery_min"] = max(
                     ctx.get("wait_for_delivery_min", 0), a_eta)
         ctx["approved_after_ask"] = approved
         ctx["late_after_ask"] = late
+        # 못 산 것(거절·결제 실패·취소)은 **주문할 때** 안다. 퇴근길에 주문했으면 퇴근길에
+        # 안 것이다 — 그 뒤 계량에서 막혀도 "집에서 안 실패" 가 아니다. 이 표시가 없으면
+        # 재계획이 집에서부터 다시 짜 퇴근길 시간을 버렸다(2026-10-01).
+        if (late or any("못" in i for i in ctx.get("order_issues", []))) \
+                and "discovery" not in ctx:
+            ctx["discovery"] = ("퇴근길 — 주문할 때 못 산 것이 있다" if pre
+                                else "귀가 후 5분 — 주문할 때 못 산 것이 있다")
         if approved and pre and not out["auto_ordered"]:
             ctx["delivery_note"] = (f"퇴근길에 확인받아 주문 — 이동 "
                                     f"{constraints.get('commute_min')}분 안에 도착, 기다림 없음")
@@ -1327,6 +1450,7 @@ def build_tasks(constraints: dict) -> list:
         if ctx.get("cook_min") is None:
             return None
         return (ctx.get("wait_for_delivery_min", 0) + ctx.get("shop_min", 0)
+                + ctx.get("late_wait_min", 0) + (constraints.get("home_elapsed_min") or 0)
                 + (0 if ctx.get("decided_before_home") else
                    FIXED_MIN["보관 확인"] + FIXED_MIN["메뉴 결정"])
                 + FIXED_MIN["준비"] + ctx["cook_min"])
@@ -1439,6 +1563,9 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             before_home = ctx.get("decided_before_home")
             # 직접 장보기로 들른 시간도 식사를 그만큼 늦춘다
             spent = (ctx.get("wait_for_delivery_min", 0) + ctx.get("shop_min", 0)
+                     + ctx.get("late_wait_min", 0)
+                     # 집에서 다시 짰다면 발견까지 이미 쓴 시간(보관 확인 단계가 옮겨 둔다)
+                     + (ctx.get("home_elapsed_min") or 0)
                      + (0 if before_home else
                         FIXED_MIN["보관 확인"] + FIXED_MIN["메뉴 결정"])
                      + FIXED_MIN["준비"] + ctx["cook_min"])
@@ -1495,6 +1622,13 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["폐기 대상"] = ctx["expired_note"]
         if K.DISCARDED:
             metrics["버리고 바꿈"] = list(K.DISCARDED)
+        if ctx.get("order_issues"):
+            metrics["주문 사고"] = list(ctx["order_issues"])
+        if ctx.get("discovery"):
+            metrics["발견 시점"] = ctx["discovery"]
+        if ctx.get("home_elapsed_min") is not None:
+            metrics["다시 짠 곳"] = (f"집 — 발견까지 {ctx['home_elapsed_min']}분을 "
+                                  f"이미 썼고, 퇴근길 주문은 쓸 수 없다")
         if ctx.get("cookware"):
             metrics["도구 확인"] = ctx["cookware"]["note"] + " (도마·칼은 기록이 없어 사람이 챙긴다)"
         # 재고 확인 — 물었든 안 물었든 남긴다(조건부 판단은 결과가 없어도 남긴다)
