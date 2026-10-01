@@ -155,6 +155,28 @@ _ORDERED: set = set()          # 이번 시도에서 주문해 받은 것 — �
 DISCARDED: list = []           # 기한이 지나 버린 것(새것으로 바꾸며)
 
 
+# 이 조리기 냄비의 사용 기록(최근 것이 끝). 조리기는 자기 냄비로 무엇을
+# 끓였는지 알고, 세척기는 그 뒤 씻었는지 안다 — 두 기기가 아는 것을 이으면
+# "못 먹는 재료가 닿은 냄비" 를 사람이 기억하지 않아도 된다(2026-10-01).
+# 도마·칼은 기기가 아니라 기록이 없다 — 사람 몫이다.
+COOKWARE: list = []
+
+
+def cookware_reset(history: list | None = None) -> None:
+    COOKWARE.clear()
+    COOKWARE.extend(dict(h) for h in (history or []))
+
+
+def cookware_use(menu: str, ingredients: list) -> None:
+    COOKWARE.append({"menu": menu, "ingredients": list(ingredients), "washed": None})
+
+
+def cookware_washed(course: str) -> None:
+    """세척기가 돌았다 — 마지막 사용을 씻은 것으로 적는다."""
+    if COOKWARE:
+        COOKWARE[-1]["washed"] = course
+
+
 def set_reality(reality: dict | None) -> None:
     """{품목: {"absent": True} | {"qty_g", "stored_days"}} — 시험용."""
     _REALITY.clear()

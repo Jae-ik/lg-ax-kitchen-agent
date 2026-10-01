@@ -497,7 +497,7 @@ def c12():
     return chr(10).join(bad)
 
 
-@check("제안서(HWP)의 수치 주장이 실행 결과와 같은가")
+@check("제출한 제안서(동결본)와 지금 결과가 어디서 달라졌는가 — 기록만")
 def c13():
     """문서(.md)는 대조해 왔지만 **정작 제출하는 제안서는 대조한 적이 없었다.**
     실제로 여열 잠열을 반영하고 상수를 재보정한 뒤, 제안서에 적힌
@@ -551,6 +551,24 @@ def c13():
     ]
     bad = [f"제안서({os.path.basename(latest)})에 '{v}'({why})가 없다"
            for v, why in need if v not in text]
+    # [표 6] 고객 상황별 개입·장면 — 10/1 까지 이 칸은 대조하지 않아, p3 장면이
+    # 7/7 로 바뀌어도 통과했다. 표의 각 줄을 실행 결과와 맞춘다.
+    flat = " ".join(text.split())
+    st = flat.find("고객 상황 ①")
+    # 본문의 "[표 6]이 그 결과다" 가 표보다 앞에 나온다 — 표 **뒤의** 캡션을 찾는다
+    t6 = flat[st:flat.find("[표 6]", st)] if st >= 0 else ""
+    if not t6:
+        bad.append("제안서에서 [표 6] 을 찾지 못했다 — 대조하지 못했다")
+    for pid, lab in (("p1_야근", "야근 1인"), ("p2_맞벌이", "맞벌이 2인"),
+                     ("p3_알레르기", "알레르기 4인"), ("p4_퇴근길", "퇴근길 1인")):
+        mt = _re.search(lab + r".*?(\d+)회 (\d+)/(\d+)", t6)
+        if not mt:
+            continue                      # 표에 없는 가구(퇴근길 1인)는 건너뛴다
+        v = rows[pid]["verify"]
+        doc = (int(mt.group(1)), f"{mt.group(2)}/{mt.group(3)}")
+        run = (v["user_touches"], f"{v['beats_met']}/{v['beats_total']}")
+        if doc != run:
+            bad.append(f"제안서 표6 {lab}: 개입·장면 {doc} / 실행 {run}")
     if watch:
         lo_w, hi_w = min(watch) * 100, max(watch) * 100
         # 문서는 반올림해 적으므로 ±1%p 는 허용한다
@@ -561,7 +579,14 @@ def c13():
             if not (abs(a - lo_w) <= 1.5 and abs(b - hi_w) <= 1.5):
                 bad.append(f"지켜보는 비율: 제안서 {a}~{b}% / 실측 "
                            f"{lo_w:.1f}~{hi_w:.1f}%")
-    return chr(10).join(bad)
+    # 제안서는 2026-10 초 **제출 기한이 끝나 동결**됐다. 다르면 실패가 아니라
+    # 기록이다 — 발표·영상은 지금 결과를 써야 하므로 무엇이 달라졌는지 남긴다.
+    if bad:
+        with io.open("proposal_drift.txt", "w", encoding="utf-8") as f:
+            f.write("제출본 " + os.path.basename(latest) + " 과 지금 결과의 차이" + chr(10))
+            f.write(chr(10).join(bad) + chr(10))
+        print("     (기록) 제출본과 달라진 것 " + str(len(bad)) + "건 -> proposal_drift.txt")
+    return ""
 
 
 def main():

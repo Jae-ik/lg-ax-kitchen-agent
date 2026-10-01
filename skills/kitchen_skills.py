@@ -366,6 +366,10 @@ class PrepSkill(Skill):
                             "missing": missing, "short_g": short}, ev)
 
 
+# 성분표에 있어도 속을 알 수 없는 원재료 이름(C002 응답에 실제로 나온다)
+OPAQUE_RAW = ("혼합제제", "기타가공품", "복합원재료", "당류가공품")
+
+
 class ProcureSkill(Skill):
     name = "procure"
     description = ("부족한 항목을 장보기 서비스에서 조달한다. 여러 상점의 가격과 "
@@ -451,6 +455,19 @@ class ProcureSkill(Skill):
                 ask.append({"name": name, "reason": "알레르기·기피 목록에 있음",
                             "safety": True})
                 ev.append(f"{name}: 안전 필터에 걸려 자동 주문 보류"); continue
+            # **이름에 안 보이는 알레르기** — 상품 원재료(성분표)를 본다. 원재료에 못
+            # 먹는 재료가 있거나 속을 알 수 없는 원재료(혼합제제 등)가 있으면 사지
+            # 않고 묻는다(2026-10-01). 성분표가 없으면 이름으로만 판단한다.
+            if avoid:
+                raws = {r for o in offers for r in (g(o, "raw_materials", ()) or ())}
+                bad = [r for r in raws if (match(r, sorted(avoid)) if match is not None
+                                           else any(a and a in r for a in avoid))]
+                opaque = [r for r in raws if any(k in r for k in OPAQUE_RAW)]
+                if bad or opaque:
+                    why = (f"성분표에 {', '.join(sorted(bad))}" if bad else
+                           f"성분표로 확인할 수 없는 원재료({', '.join(sorted(opaque))})")
+                    ask.append({"name": name, "reason": why, "safety": True})
+                    ev.append(f"{name}: {why} → 사지 않고 묻는다"); continue
             if mode == "self":
                 # 사람이 직접 산다 — 배송 시간·주문 가능 여부는 상관없다.
                 # 못 먹는 것은 위에서 이미 걸렀다(목록에도 넣지 않는다).

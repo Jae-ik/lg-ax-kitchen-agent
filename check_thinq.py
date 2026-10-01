@@ -390,7 +390,10 @@ def d8():
     s1, v1 = r1["scenario"], r1["verify"]
     same = ([b["at"] + b["system"] for b in s1["beats"]]
             == [b["at"] + b["system"] for b in r2["scenario"]["beats"]])
-    ok = (same and s1["covered"] == 2 and s1["total_friction"] == 3
+    # 10/1: 냄비 기록 기능이 생겨, LLM 이 "덜어 줄 기능이 없다" 고 한 조리 기구
+    # 불편을 틀 장면이 채운다(녹화는 그 기능 전). 그래서 3/3 이고, LLM 이 못 덮는다고
+    # 밝힌 기록(uncovered)은 그대로 남는다.
+    ok = (same and s1["covered"] == 3 and s1["total_friction"] == 3
           and v1["verified"] and r1["design_report"]["uncovered"]
           and not r1["design_report"]["rejected"])   # 번호가 밀려 버려지지 않는다
     return ok, (f"덮음 {s1['covered']}/{s1['total_friction']} · 장면 "
@@ -1032,6 +1035,47 @@ def p1_redact():
     leak = [k for k in ("010-1234", "월드컵로 12", "kim@mail", "김영희") if k in t]
     keep = all(k in t for k in ("40분", "두부", "퇴근"))
     return not leak and keep, f"새어 나간 것 {leak} · 일에 필요한 말(40분·두부·퇴근) 남음 {keep}"
+
+
+# ── 15 남은 위험 5 — 교차 오염·성분표 (2026-10-01) ─────────────────────
+@check("5a 못 먹는 재료가 닿은 냄비를 씻은 기록이 없으면 알리고, 씻었으면 그대로 쓴다")
+def t5a_cookware():
+    import contextlib, io, personas, run_design
+    from orchestrator import Trace
+    out = {}
+    for washed in ("표준", None):
+        p = personas.get("p3_알레르기")
+        p["cookware_history"] = [dict(p["cookware_history"][0], washed=washed)]
+        personas.PERSONAS["_t5a"] = dict(p, id="_t5a")
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                r = run_design.design_for("_t5a", Trace(), seed=7)
+        finally:
+            del personas.PERSONAS["_t5a"]
+        out[washed] = (r["verify"]["metrics"].get("도구 확인"), r["verify"]["user_touches"])
+    ok = ("그대로 쓴다" in out["표준"][0] and "씻은 기록이 없다" in out[None][0]
+          and out[None][1] == out["표준"][1] + 1)
+    return ok, f"씻음 → 개입 {out['표준'][1]} · 안 씻음 → 개입 {out[None][1]} (알림)"
+
+
+@check("5b 이름에 안 보이는 알레르기를 상품 원재료로 거르고, 속 모를 원재료면 묻는다")
+def t5b_raw():
+    from skills import REGISTRY
+    from recipe_parse import contains_any, expand_avoid
+    import store
+    lk = store.make_lookup()
+    proc = REGISTRY.get("procure")
+
+    def run(items, avoid):
+        r = proc.run(missing=items, lookup=lk, known_items=items, mode="auto",
+                     deadline_min=60, avoid=expand_avoid(avoid)[0], match=contains_any).output
+        return {c["name"]: c["reason"] for c in r["need_confirm"]}, [a["name"] for a in r["auto_ordered"]]
+    a = run(["카레가루", "부침가루"], ["우유"])      # 카레가루엔 분유, 부침가루엔 없다
+    b = run(["맛술"], ["새우"])                      # 속 모를 원재료
+    c = run(["맛술"], [])                            # 알레르기 없으면 상관없다
+    ok = ("카레가루" in a[0] and "분유" in a[0]["카레가루"] and "부침가루" in a[1]
+          and "확인할 수 없는" in b[0].get("맛술", "") and "맛술" in c[1])
+    return ok, f"우유 → 카레가루 '{a[0].get('카레가루')}' · 새우 → 맛술 '{b[0].get('맛술')}' · 없음 → 맛술 자동"
 
 
 @check("가전이 할 수 없는 손일을 약속한 장면은 버린다")

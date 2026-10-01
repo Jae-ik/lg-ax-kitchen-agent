@@ -310,6 +310,27 @@ UNSURE_SOURCES = ("told", "assumed")
 CONFIRM_SHELF_DAYS = 14
 
 
+def cookware_check(avoid_expanded: list) -> dict | None:
+    """조리 전에 냄비 기록을 본다. 못 먹는 재료가 닿은 뒤 씻은 기록이 없으면 알린다.
+
+    씻은 기록은 **세척기**에서만 온다 — 손으로 씻었으면 기록이 없으므로 알린다
+    (모르면 묻는 쪽이다). 도마·칼은 기록이 없어 보지 못한다.
+    """
+    if not avoid_expanded:
+        return None
+    last = K.COOKWARE[-1] if K.COOKWARE else None
+    if last is None:
+        return {"ask": False, "note": "이 냄비로 조리한 기록이 없다 — 확인할 것 없음"}
+    hits = [i for i in last["ingredients"] if contains_any(i, avoid_expanded)]
+    if not hits:
+        return {"ask": False, "note": f"마지막 조리({last['menu']})에 못 먹는 재료가 없었다"}
+    if last.get("washed"):
+        return {"ask": False, "note": (f"마지막 조리({last['menu']})에 {', '.join(hits)} — "
+                                       f"그 뒤 세척기 {last['washed']} 코스로 씻었다. 그대로 쓴다")}
+    return {"ask": True, "note": (f"마지막 조리({last['menu']})에 {', '.join(hits)} — 씻은 "
+                                  f"기록이 없다. 냄비를 씻거나 다른 냄비를 쓰라고 알린다")}
+
+
 def _expired(item: dict) -> bool:
     sd, sl = item.get("stored_days"), item.get("shelf_life_days")
     return sd is not None and bool(sl) and sd > sl
@@ -398,6 +419,14 @@ def kitchen_beats(persona: dict, constraints: dict, plus) -> list:
             "verified_by": "inventory", "expect_metric": "재고 확인"})
 
     if constraints.get("avoid"):
+        beats.append({
+            "at": plus(t0, 3),
+            "user": "어느 냄비가 못 먹는 재료에 닿았는지 기억하지 않는다",
+            "system": "조리기가 이 냄비로 무엇을 끓였는지, 세척기가 그 뒤 씻었는지를 이어 "
+                      "본다. 못 먹는 재료가 닿은 뒤 씻은 기록이 없으면 알린다. "
+                      "도마·칼은 기록이 없어 사람이 챙긴다",
+            "removes": "조리 기구가 섞이지 않게 신경 쓰는 일",
+            "verified_by": "prep", "expect_metric": "도구 확인"})
         beats.append({
             "at": plus(lv, 1),
             "user": "메시지로 확인만 한다" if pre else "아무것도 확인하지 않는다",
@@ -576,8 +605,10 @@ KITCHEN_CAPS = {
                 "주문하지 않고 살 것 목록만)을 따른다. 어느 방식이든 처음 사는 것·"
                 "금액 상한 초과·못 먹는 재료는 자동으로 사지 않는다",
                 ["조달 대기", "확인 요청", "직접 살 것"]),
-    "prep": ("먹는 사람 수와 조리기 용량에 맞춰 넣을 양을 정하고 계량을 안내한다",
-             ["조리량"]),
+    "prep": ("먹는 사람 수와 조리기 용량에 맞춰 넣을 양을 정하고 계량을 안내한다. "
+             "알레르기 가구는 조리기의 냄비 사용 기록과 세척기의 세척 기록을 이어, 못 먹는 "
+             "재료가 닿은 뒤 씻지 않은 냄비면 알린다(도마·칼은 기록이 없어 사람이 챙긴다)",
+             ["조리량", "도구 확인"]),
     "converge": ("화력을 스스로 조절하고 목표 상태에 닿으면 불을 끈다. 재료 투입·"
                  "뚜껑·젓기처럼 손이 필요한 때만 알린다", ["가열 시간(분)"]),
     "aftercare": ("조리 중에 잰 눌어붙음 정도로 식기세척기 코스를 정하고, "
@@ -981,6 +1012,11 @@ def build_tasks(constraints: dict) -> list:
                                     f"조리를 시작한다 (확인 후 주문 포함)")
 
     def _prep_bind(ctx):
+        # 계량 전에 냄비를 본다 — 못 먹는 재료가 닿은 뒤 씻지 않았으면 알린다
+        cw = cookware_check(avoid)
+        ctx["cookware"] = cw
+        if cw and cw["ask"]:
+            ctx["touches"] = ctx.get("touches", 0) + 1
         return {"record": ctx["record"], "weigh": K.prep_weigh,
                 # 계량에서도 한 번 더 막는다 — 기한 지난 것은 없는 것이다
                 "available": lambda n: (K.fridge_check(n) is not None
@@ -989,6 +1025,9 @@ def build_tasks(constraints: dict) -> list:
                 "broth_of": broth_of}
 
     def _prep_absorb(ctx, out):
+        # 이번 조리를 냄비 기록에 남긴다 — 다음 조리가 본다
+        K.cookware_use(ctx.get("menu_name") or "",
+                       [i["name"] for i in ctx["record"].get("ingredients", [])])
         ctx["mass_g"] = out["total_mass_g"]
         ctx["add_later"] = out.get("add_later") or []
         ctx["absorb_cap_g"] = out.get("absorb_cap_g") or 0.0
@@ -1304,6 +1343,7 @@ def build_tasks(constraints: dict) -> list:
                 "quiet_after": constraints.get("quiet_after")}
 
     def _aftercare_absorb(ctx, out):
+        K.cookware_washed(out["course"])
         ctx["course"] = out["course"]
         ctx["quiet_note"] = out.get("quiet_note")
         ctx["need_probs"] = out.get("need_probs")
@@ -1455,6 +1495,8 @@ def make_executor(registry, on_step=None, seed_ctx=None):
             metrics["폐기 대상"] = ctx["expired_note"]
         if K.DISCARDED:
             metrics["버리고 바꿈"] = list(K.DISCARDED)
+        if ctx.get("cookware"):
+            metrics["도구 확인"] = ctx["cookware"]["note"] + " (도마·칼은 기록이 없어 사람이 챙긴다)"
         # 재고 확인 — 물었든 안 물었든 남긴다(조건부 판단은 결과가 없어도 남긴다)
         sc = ctx.get("stock_confirm")
         if sc:
